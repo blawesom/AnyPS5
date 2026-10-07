@@ -1742,7 +1742,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         record.pipeline->ContinueSecondChannel(commands);
         recordDrawCommands(context, commands, state, draw, inputs, record.indirect, argumentBuffer, argumentOffset);
     }
-    if (meshArguments != nullptr) recorder->Keep(meshArguments);
+        NoteDepthSurfaceWrite(context, state);    if (meshArguments != nullptr) recorder->Keep(meshArguments);
     if (args != nullptr) CountIndirectDraw(record.indirect->path, record.indirect->readMs, rewritten);
     auto checkRecords = indirectRecordCheck(record.indirect);
     APS5_LOG_CHARS_OUT_DEBUG("Draw recorded");
@@ -2219,7 +2219,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         pipeline->ContinueSecondChannel(commands);
         recordDrawCommands(context, commands, state, draw, inputs, args != nullptr ? &indirect : nullptr, argumentBuffer, argumentOffset);
     }
-    if (meshArguments != nullptr && recorded) recorder->Keep(meshArguments);
+        NoteDepthSurfaceWrite(context, state);    if (meshArguments != nullptr && recorded) recorder->Keep(meshArguments);
     if (args != nullptr) CountIndirectDraw(indirect.path, indirect.readMs, rewritten);
     auto checkRecords = indirectRecordCheck(args != nullptr ? &indirect : nullptr);
     APS5_LOG_CHARS_OUT_DEBUG("Draw recorded");
