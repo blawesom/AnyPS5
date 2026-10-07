@@ -1201,7 +1201,7 @@ Pieces clipPieces(const Pieces& pieces, std::uint64_t begin, std::uint64_t end) 
 }
 
 bool refreshSparseMirror(ImageMirror& mirror, std::vector<RefreshBlock>& blocks) {
-    auto pieces = GuestMemory::DescribeCommitted(mirror.base, static_cast<std::size_t>(mirror.reserved)).ranges;
+    auto pieces = GuestMemory::DescribeCommitted(mirror.base, static_cast<std::size_t>(mirror.reserved)).partialRanges;
     if (!pieces.empty() && pieces.back().second > mirror.base + mirror.bytes) return false;
     syncRange(mirror.base, mirror.bytes);
     const auto generation = collectPieces(pieces);
@@ -1277,7 +1277,7 @@ std::shared_ptr<ImageMirror> acquireMirror(const Context& context, const std::sh
     Pieces pieces;
     if (!GuestMemory::Accessible(reinterpret_cast<const void*>(range->address), range->bytes, range->writable && !heap)) {
         if (!heap || !sparseMirrorsEnabled()) return nullptr;
-        pieces = GuestMemory::DescribeCommitted(range->address, range->bytes).ranges;
+        pieces = GuestMemory::DescribeCommitted(range->address, range->bytes).partialRanges;
         if (pieces.empty()) return nullptr;
     }
     const bool sparse = !pieces.empty();
@@ -2219,7 +2219,7 @@ void GuestBufferMemory::addCopiedRange(const CopiedRange& range) {
     auto committed = GuestMemory::DescribeCommitted(range.begin, range.end - range.begin);
     if (!committed.whole) {
         region.sparse = true;
-        region.backed = std::move(committed.ranges);
+        region.backed = std::move(committed.partialRanges);
     }
     regions.push_back(std::move(region));
 }
@@ -2306,7 +2306,7 @@ void GuestBufferMemory::addDescriptorRegion(std::uint64_t address, std::size_t b
         // A GPU heap bound whole while the guest commits its pages on demand, or a descriptor left
         region.sparse = true;
         region.sparseHeap = true;
-        region.backed = std::move(committed.ranges);
+        region.backed = std::move(committed.partialRanges);
     }
     regions.push_back(std::move(region));
     regionsSorted = false;
@@ -2650,10 +2650,11 @@ void GuestBufferMemory::UploadPrepare(bool addressable) {
         into.sparse = !(into.backed.size() == 1 && into.backed.front().first <= into.begin && into.backed.front().second >= end);
         if (!into.sparse) into.backed.clear();
     };
-    std::vector<Region> merged;
-    for (auto& region : regions) {
-        if (!merged.empty() && region.begin < merged.back().end) {
-            auto& previous = merged.back();
+    auto merged = regions.begin();
+    for (auto current = regions.begin(); current != regions.end(); ++current) {
+        auto& region = *current;
+        if (merged != regions.begin() && region.begin < std::prev(merged)->end) {
+            auto& previous = *std::prev(merged);
             if (previous.mirror != nullptr || region.mirror != nullptr) {
                 // A descriptor range inside a mirrored image range binds the mirror's bytes (registered
                 // ranges never overlap, so the other part is such a descriptor; it sorts first when it
@@ -2692,10 +2693,11 @@ void GuestBufferMemory::UploadPrepare(bool addressable) {
             }
             previous.end = std::max(previous.end, region.end);
         } else {
-            merged.push_back(std::move(region));
+            if (merged != current) *merged = std::move(region);
+            ++merged;
         }
     }
-    regions = std::move(merged);
+    regions.erase(merged, regions.end());
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     const auto started = std::chrono::steady_clock::now();
     for (auto& region : regions) {
@@ -3375,7 +3377,7 @@ void storeChanged(std::uint64_t address, std::span<const std::byte> current, std
         throw std::runtime_error(message);
     };
     auto cursor = address;
-    for (const auto& [first, last] : writable.ranges) {
+    for (const auto& [first, last] : writable.partialRanges) {
         if (cursor < first) unchanged(cursor, first);
         const auto at = static_cast<std::size_t>(first - address);
         const auto length = static_cast<std::size_t>(last - first);
@@ -3394,7 +3396,7 @@ void storeSparse(ImageMirror& mirror, std::uint64_t address, std::span<const std
         for (auto index = from / block - mirror.base / block; index <= (to - 1) / block - mirror.base / block; ++index) mirror.generations[static_cast<std::size_t>(index)] = 0;
     };
     auto cursor = address;
-    for (const auto& [first, last] : GuestMemory::DescribeCommitted(address, current.size(), true).ranges) {
+    for (const auto& [first, last] : GuestMemory::DescribeCommitted(address, current.size(), true).partialRanges) {
         forget(cursor, first);
         const auto at = static_cast<std::size_t>(first - address);
         const auto length = static_cast<std::size_t>(last - first);
