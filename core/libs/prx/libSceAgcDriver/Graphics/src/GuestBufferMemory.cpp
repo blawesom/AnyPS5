@@ -1905,7 +1905,7 @@ const HostImport* HostImportFor(const Context& context, std::uint64_t address, s
     // A hit is only valid while the registry has not changed since the imports were reconciled.
     if (!importsStale(context, state)) {
         if (const auto* entry = findImport(state, address, address + bytes)) return entry;
-        const auto lease = GuestAllocations::GuestAllocationsAcquireRange_nid_postfix(address, bytes);
+        const auto lease = GuestAllocations::GuestAllocationsAcquireRange_nid_no_patch(address, bytes);
         if (!importsStale(context, state)) {
             if (lease.empty()) return nullptr;
             const auto& range = *lease.front();
@@ -1947,7 +1947,7 @@ bool ImportMappedRanges(const Context& context, const GuestAllocations::Mapped& 
 }
 
 bool RegisteredReadableCovers(std::uint64_t address, std::size_t bytes) {
-    return !GuestAllocations::GuestAllocationsAcquireRange_nid_postfix(address, bytes).empty();
+    return !GuestAllocations::GuestAllocationsAcquireRange_nid_no_patch(address, bytes).empty();
 }
 
 std::uint64_t RegisteredReadableEnd(std::uint64_t address) {
@@ -2889,7 +2889,14 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
             region.direct = nullptr;
             if (entry == nullptr) entry = findImport(state, region.begin, region.end);
             if (entry == nullptr) {
-                if (runCovers(importRanges(), region.begin, region.end)) entry = importAllocation(context, state, region.begin, importRanges());
+                GuestAllocations::Lease targeted;
+                const bool haveLease = !lease.empty() || space != nullptr || !acquired.empty();
+                if (!haveLease) targeted = GuestAllocations::GuestAllocationsAcquireRange_nid_no_patch(region.begin, bytes);
+                const bool stale = importsStale(context, state);
+                const auto& available = haveLease || stale ? importRanges() : targeted;
+                if (stale) refreshImports(context, state, available);
+                if (const auto* range = containingRange(available, region.begin, region.end))
+                    entry = importAllocation(context, state, range->address, available);
             }
             // A staged region (see stagingEligible) is copied out of the import even when aligned;
             // without a recorder to record the copies it binds in place like any other.
