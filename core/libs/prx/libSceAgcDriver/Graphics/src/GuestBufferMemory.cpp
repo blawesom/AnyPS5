@@ -1909,7 +1909,7 @@ const HostImport* HostImportFor(const Context& context, std::uint64_t address, s
         if (!importsStale(context, state)) {
             if (lease.empty()) return nullptr;
             const auto& range = *lease.front();
-            return importAllocation(context, state, range.address, range.bytes, lease);
+            return importAllocation(context, state, range.address, lease);
         }
     }
     const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();

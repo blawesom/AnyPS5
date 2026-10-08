@@ -34,10 +34,10 @@ void targetedLeaseTests() {
     using GuestAllocations::GuestAllocationsAcquireRange_nid_no_patch;
     {
         GuestAllocations::Mutation mutation;
-        mutation.Add(memory.data(), 64, true, true);
-        mutation.Add(memory.data() + 64, 64, true, false);
-        mutation.Add(memory.data() + 128, 64, false, false);
-        mutation.Add(memory.data() + 256, 64, true, true);
+        mutation.Add(memory.data(), 64, true, true, true);
+        mutation.Add(memory.data() + 64, 64, true, false, true);
+        mutation.Add(memory.data() + 128, 64, false, false, true);
+        mutation.Add(memory.data() + 256, 64, true, true, true);
     }
     Require(GuestAllocationsAcquireRange_nid_no_patch(0, 1).empty(), "a null address acquired a lease");
     Require(GuestAllocationsAcquireRange_nid_no_patch(base, 0).empty(), "an empty range acquired a lease");
@@ -58,13 +58,13 @@ void targetedLeaseTests() {
     }
     {
         GuestAllocations::Mutation mutation;
-        mutation.Protect(memory.data(), 64, false, false, [] {});
+        mutation.Protect(memory.data(), 64, false, false, true, [] {});
     }
     Require(GuestAllocationsAcquireRange_nid_no_patch(base, 1).empty(), "a protection change left a readable lease");
     {
         GuestAllocations::Mutation mutation;
         mutation.Remove(memory.data());
-        mutation.Add(memory.data(), 32, true, true);
+        mutation.Add(memory.data(), 32, true, true, true);
     }
     Require(GuestAllocationsAcquireRange_nid_no_patch(base, 32).size() == 1 && GuestAllocationsAcquireRange_nid_no_patch(base, 33).empty(), "address reuse retained the previous allocation extent");
     {
@@ -81,17 +81,17 @@ void rangeMutationTests() {
     const auto base = reinterpret_cast<std::uintptr_t>(memory.data());
     {
         GuestAllocations::Mutation mutation;
-        mutation.Add(memory.data(), 128, true, true);
-        mutation.Add(memory.data() + 192, 128, true, true);
+        mutation.Add(memory.data(), 128, true, true, true);
+        mutation.Add(memory.data() + 192, 128, true, true, true);
         mutation.RequireAvailable(memory.data() + 128, 64);
         reject([&] { mutation.RequireAvailable(memory.data() + 127, 2); });
         reject([&] { mutation.RequireAvailable(memory.data() + 191, 2); });
         Require(mutation.Covers(memory.data() + 96, 32), "a covered suffix was missed");
         Require(!mutation.Covers(memory.data() + 96, 97), "coverage skipped a hole");
         bool applied = false;
-        reject([&] { mutation.Protect(memory.data() + 96, 97, true, false, [&] { applied = true; }); });
+        reject([&] { mutation.Protect(memory.data() + 96, 97, true, false, true, [&] { applied = true; }); });
         Require(!applied, "protection with a hole reached the host");
-        reject([&] { mutation.Protect(memory.data() + 32, 32, true, false, [] { throw std::runtime_error("host protection failure"); }); });
+        reject([&] { mutation.Protect(memory.data() + 32, 32, true, false, true, [] { throw std::runtime_error("host protection failure"); }); });
         reject([&] { mutation.Unmap(memory.data() + 32, 32, [](const void*, std::size_t, const void*, bool) { throw std::runtime_error("host unmap failure"); }); });
     }
     {
@@ -102,7 +102,7 @@ void rangeMutationTests() {
     {
         const auto unrelated = GuestAllocations::GuestAllocationsAcquireRange_nid_no_patch(base + 192, 128);
         GuestAllocations::Mutation mutation;
-        mutation.Protect(memory.data() + 32, 32, true, false, [] {});
+        mutation.Protect(memory.data() + 32, 32, true, false, true, [] {});
         Require(mutation.Covers(memory.data(), 128), "coverage did not cross protection fragments");
         mutation.Unmap(memory.data(), 128, [&](const void* pointer, std::size_t bytes, const void* allocation, bool last) {
             Require(pointer == memory.data() && bytes == 128 && allocation == memory.data() && last,
@@ -111,7 +111,7 @@ void rangeMutationTests() {
         Require(unrelated.size() == 1 && unrelated[0]->address == base + 192 && unrelated[0]->bytes == 128,
             "a neighboring mutation changed an unrelated lease");
         mutation.RequireAvailable(memory.data(), 192);
-        mutation.Add(memory.data(), 128, true, true);
+        mutation.Add(memory.data(), 128, true, true, true);
         mutation.Remove(memory.data());
     }
     {

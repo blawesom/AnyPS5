@@ -1,5 +1,6 @@
 #include "prx/libc/include/GuestAllocations.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <iterator>
 #include <map>
+#include <span>
 #include <stdexcept>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -48,6 +50,36 @@ std::atomic<void (*)(std::uintptr_t, std::size_t)> invalidator{nullptr};
 std::atomic<bool (*)(std::uintptr_t, std::size_t)> pinWaiter{nullptr};
 std::atomic<void (*)(const Mapped&, std::uint64_t)> gpuMapObserver{nullptr};
 std::atomic<std::uint32_t> gpuMapObserverCalls{0};
+
+struct MappingHistory {
+    struct Change {
+        std::uint64_t generation = 0;
+        std::uintptr_t address = 0;
+        std::size_t bytes = 0;
+    };
+    std::mutex mutex;
+    std::array<Change, 1024> changes{};
+    std::size_t next = 0;
+    std::uint64_t discardedThrough = 0;
+};
+
+MappingHistory& mappingHistory() {
+    static MappingHistory history;
+    return history;
+}
+
+void publishChanges(std::span<const std::pair<std::uintptr_t, std::size_t>> ranges) {
+    auto& history = mappingHistory();
+    std::lock_guard lock(history.mutex);
+    const auto nextGeneration = generation.load(std::memory_order_relaxed) + 1;
+    for (const auto& [address, bytes] : ranges) {
+        auto& change = history.changes[history.next];
+        history.discardedThrough = change.generation;
+        change = {nextGeneration, address, bytes};
+        history.next = (history.next + 1) % history.changes.size();
+    }
+    generation.store(nextGeneration, std::memory_order_release);
+}
 
 std::chrono::milliseconds pinWait() {
     static const std::chrono::milliseconds value{[] {
@@ -114,7 +146,8 @@ void* GuestAllocationsBegin_nid_postfix() {
 
 void GuestAllocationsEnd_nid_postfix(void* mutation) noexcept {
     auto* state = static_cast<MutationState*>(mutation);
-    const auto ended = generation.fetch_add(1, std::memory_order_release) + 1;
+    publishChanges(state->changed);
+    const auto ended = generation.load(std::memory_order_acquire);
     if (const auto callback = invalidator.load(std::memory_order_acquire)) {
         for (const auto& [address, bytes] : state->changed) callback(address, bytes);
     }
@@ -146,12 +179,32 @@ std::uint64_t GuestAllocationsGeneration_nid_postfix() {
     return generation.load(std::memory_order_acquire);
 }
 
+std::uint64_t GuestAllocationsValidateMapping_nid_no_patch(std::uintptr_t address, std::size_t bytes, std::uint64_t since) {
+    if (since == 0 || bytes == 0 || bytes > std::numeric_limits<std::uintptr_t>::max() - address) return 0;
+    auto current = generation.load(std::memory_order_acquire);
+    if (since == current) return current;
+    auto& history = mappingHistory();
+    std::lock_guard lock(history.mutex);
+    current = generation.load(std::memory_order_relaxed);
+    if (since > current || since < history.discardedThrough) return 0;
+    const auto end = address + bytes;
+    auto index = history.next;
+    for (std::size_t count = 0; count < history.changes.size(); ++count) {
+        index = (index + history.changes.size() - 1) % history.changes.size();
+        const auto& change = history.changes[index];
+        if (change.generation <= since) break;
+        if (change.bytes > std::numeric_limits<std::uintptr_t>::max() - change.address || (change.address < end && address < change.address + change.bytes)) return 0;
+    }
+    return current;
+}
+
 void GuestAllocationsSetInvalidator_nid_postfix(void (*callback)(std::uintptr_t, std::size_t)) {
     invalidator.store(callback, std::memory_order_release);
 }
 
 void GuestAllocationsInvalidate_nid_postfix(std::uintptr_t address, std::size_t bytes) {
-    generation.fetch_add(1, std::memory_order_release);
+    const std::pair range{address, bytes};
+    publishChanges(std::span(&range, 1));
     if (const auto callback = invalidator.load(std::memory_order_acquire)) callback(address, bytes);
 }
 
@@ -195,6 +248,7 @@ void registerImage(const void* image) {
                 require(previous.address + previous.bytes <= cursor, "guest image overlaps a registered allocation");
             }
             replacement.emplace(cursor, std::make_shared<const Range>(Range{cursor, memory.RegionSize, readable, writable, cursor, memory.RegionSize, false}));
+            recordChange(mutation, reinterpret_cast<const void*>(cursor), memory.RegionSize);
             registered = true;
         }
         cursor += memory.RegionSize;
@@ -230,7 +284,7 @@ void GuestAllocationsUnregisterImage_nid_postfix(void* mutation, const void* ima
     state.registeredImages.erase(found);
 }
 #else
-void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
+void GuestAllocationsRegisterMainImage_nid_postfix(void* mutation) {
     auto& state = registry();
     if (state.mainImageRegistered) return;
     struct Page {
@@ -269,6 +323,7 @@ void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
             require(previous.address + previous.bytes <= address, "guest image overlaps a registered allocation");
         }
         replacement.emplace(address, std::make_shared<const Range>(Range{address, bytes, page->second.readable, page->second.writable, address, bytes, false}));
+        recordChange(mutation, reinterpret_cast<const void*>(address), bytes);
         page = std::next(last);
     }
     state.ranges.swap(replacement);
