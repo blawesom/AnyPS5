@@ -947,6 +947,8 @@ void TestOptionalVideoBuffersRespectMemoryLimit() {
     run(2, 2);
     run(4, 2);
     run(6, 6);
+    run(9, 6);
+    run(10, 10);
     SetTextureLimit(std::nullopt);
 }
 
@@ -964,11 +966,9 @@ void TestFileReplacementAutoStart() {
     Check(!file.stream.is_open(), "replaced file left open");
 }
 
-void TestHandedOutFramesStayIntact() {
-    constexpr int Buffers = 6;
-    constexpr int Retained = Buffers - 2;
+void CheckHandedOutFramesStayIntact(int buffers, std::size_t retained) {
     AvPlayerInitData init = InitData(nullptr);
-    init.num_output_video_framebuffers = Buffers;
+    init.num_output_video_framebuffers = buffers;
     auto* player = sceAvPlayerInit(&init);
     Check(player != nullptr, "init failed");
     Check(sceAvPlayerSetAvSyncMode(player, 1) == 0, "sync mode rejected");
@@ -983,10 +983,10 @@ void TestHandedOutFramesStayIntact() {
         Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "no frame for round " + std::to_string(round));
         CheckVideoFrame(frame);
         taken.push_back({static_cast<const std::uint8_t*>(frame.p_data), FrameIndex(frame.timestamp)});
-        if (taken.size() > Retained) taken.pop_front();
+        if (taken.size() > retained) taken.pop_front();
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         for (std::size_t k = 0; k < taken.size(); ++k) {
-            for (std::size_t other = k + 1; other < taken.size(); ++other) Check(taken[k].luma != taken[other].luma, "one buffer handed out twice among the last " + std::to_string(Retained) + " frames");
+            for (std::size_t other = k + 1; other < taken.size(); ++other) Check(taken[k].luma != taken[other].luma, "one buffer handed out twice among the last " + std::to_string(retained) + " frames");
             const int index = taken[k].index;
             Check(std::abs(taken[k].luma[30 * Pitch + 10] - LumaFor(index)) <= 6, "frame " + std::to_string(index) + " was overwritten " + std::to_string(taken.size() - 1 - k) + " frames after it was handed out");
         }
@@ -1087,6 +1087,11 @@ void TestUnsyncedVideoKeepsUpWithAudio() {
     }
     Check(worst <= 150, "video fell " + std::to_string(worst) + " ms behind the audio");
     Check(sceAvPlayerClose(player) == 0, "close failed");
+}
+
+void TestHandedOutFramesStayIntact() {
+    CheckHandedOutFramesStayIntact(6, 5);
+    CheckHandedOutFramesStayIntact(2, 5);
 }
 
 }
