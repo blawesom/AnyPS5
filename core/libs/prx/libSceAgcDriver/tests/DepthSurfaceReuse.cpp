@@ -163,6 +163,7 @@ void RunDepthSurfaceReuseTests() {
     context.memory.memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     context.limits.maxFramebufferWidth = 16384;
     context.limits.maxFramebufferHeight = 16384;
+    context.limits.maxImageArrayLayers = 256;
     constexpr std::uint64_t depth32 = 0x40000000;
     constexpr std::uint64_t depth16 = 0x50000000;
     constexpr std::uint64_t depthStencil = 0x60000000;

@@ -357,7 +357,8 @@ VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target) 
         surface->clearStencil = target.clearStencil;
         if (cleared) surface->pendingClear |= VK_IMAGE_ASPECT_DEPTH_BIT;
         surface->ApplyFastClear();
-        return surface->view;    }
+        return surface->view;
+    }
     surfaces().push_back(std::make_unique<DepthSurface>(context, target));
     return surfaces().back()->view;
 }
@@ -379,6 +380,44 @@ void NoteHtileDepthClear(std::uint64_t htileAddress) {
         existing = true;
     }
     if (!existing) clearedHtiles().insert(htileAddress);
+}
+
+bool DepthSurfaceHolds(const Context& context, const GuestTextureResource& resource, const Texture* texture) {
+    if (resource.dimension != TextureDimension::k2D || resource.baseArray != 0) return false;
+    const auto address = resource.baseAddress;
+    std::lock_guard lock(surfacesMutex());
+    const auto& list = surfaces();
+    const auto found = std::find_if(list.rbegin(), list.rend(), [&](const auto& surface) {
+        return surface->context.device == context.device && (surface->target.address == address || (surface->target.stencilAddress != 0 && surface->target.stencilAddress == address));
+    });
+    return found != list.rend() && (*found)->Holds(texture);
+}
+
+VkImageAspectFlags HtileFillClears(std::uint32_t pattern, bool stencilInHtile) {
+    VkImageAspectFlags cleared = (pattern & 0xfu) == 0 ? VK_IMAGE_ASPECT_DEPTH_BIT : 0u;
+    if (stencilInHtile && ((pattern >> 8u) & 0x3u) == 0) cleared |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    return cleared;
+}
+
+std::uint64_t HtileMetadataBytes(VkExtent2D extent) {
+    const auto blocks = static_cast<std::uint64_t>((extent.width + 1023u) / 1024u) * ((extent.height + 511u) / 512u);
+    return blocks * 32768u;
+}
+
+bool HtileFillCovers(std::uint64_t htile, VkExtent2D extent, std::uint64_t address, std::size_t bytes) {
+    if (htile == 0 || htile < address || htile >= address + bytes) return false;
+    return address + bytes - htile >= HtileMetadataBytes(extent);
+}
+
+void NoteDepthMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
+    std::lock_guard lock(surfacesMutex());
+    for (const auto& surface : surfaces()) {
+        const auto& target = surface->target;
+        if (!HtileFillCovers(target.htileAddress, target.extent, address, bytes)) continue;
+        const VkImageAspectFlags written = VK_IMAGE_ASPECT_DEPTH_BIT | (target.htileStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u);
+        surface->pendingClear = (surface->pendingClear & ~written) | HtileFillClears(pattern, target.htileStencil);
+    }
+}
 
 void NoteDepthSurfaceWrite(const Context& context, const DepthTarget& target, VkImageAspectFlags aspects) {
     if (aspects == 0) return;
@@ -398,7 +437,8 @@ void NoteDepthSurfaceWrite(const Context& context, const State& state) {
         return stencil.writeMask != 0 && (stencil.failOp != VK_STENCIL_OP_KEEP || stencil.passOp != VK_STENCIL_OP_KEEP || stencil.depthFailOp != VK_STENCIL_OP_KEEP);
     };
     if (state.stencilTest && (writesStencil(state.stencilFront) || writesStencil(state.stencilBack))) aspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    NoteDepthSurfaceWrite(context, *state.depth, aspects);}
+    NoteDepthSurfaceWrite(context, *state.depth, aspects);
+}
 
 void ClearDepthSurfaces(VkDevice device) {
     std::lock_guard lock(surfacesMutex());
@@ -450,6 +490,20 @@ std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<c
         }
     }
     if (base == nullptr) return nullptr;
+    // A view of another extent or format over a surface's memory is reused memory, not an error:
+    // the console's titles recycle temporary GPU memory, so only a matching descriptor resolves.
+    {
+        const auto& target = base->target;
+        if (resource.width != target.extent.width || resource.height != target.extent.height) return nullptr;
+        const bool stencilView = target.stencilAddress != 0 && matchedAddress == target.stencilAddress;
+        if (!stencilView) {
+            const bool d16 = target.format == VK_FORMAT_D16_UNORM || target.format == VK_FORMAT_D16_UNORM_S8_UINT;
+            const bool depthBits = words.size() >= 4 && ShaderRecompiler::DepthBitsTextureWidth(words[1], words[3]) == (d16 ? 16u : 32u);
+            if (ResolveTextureFormat(resource.format) != (d16 ? VK_FORMAT_R16_UNORM : VK_FORMAT_R32_SFLOAT) && !depthBits) return nullptr;
+        } else if (BytesPerElement(resource.format) != 1u) {
+            return nullptr;
+        }
+    }
     auto viewed = resource;
     viewed.baseAddress = matchedAddress;
     base->ValidateSampled(words, viewed);
@@ -471,8 +525,9 @@ std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<c
         slices.push_back(slice);
     }
     base->ApplyFastClear();
-    for (const auto* slice : slices) slice->ApplyFastClear();
-    return base->Sampled(resource, components, slices, stencil);}
+    for (auto* slice : slices) if (slice != nullptr) slice->ApplyFastClear();
+    return base->Sampled(resource, components, slices, stencil);
+}
 
 bool DepthSurfaceAt(std::uint64_t address) {
     std::lock_guard lock(surfacesMutex());
