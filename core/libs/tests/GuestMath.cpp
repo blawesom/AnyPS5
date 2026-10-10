@@ -52,6 +52,7 @@ float APS5_VABI log1pf_nid_postfix(float);
 double APS5_VABI expm1_nid_postfix(double);
 float APS5_VABI logbf_nid_postfix(float);
 double APS5_VABI exp2_nid_postfix(double);
+double APS5_VABI __powidf2_nid_postfix(double, int);
 double APS5_VABI ldexp_nid_postfix(double, int);
 double APS5_VABI scalbn_nid_postfix(double, int);
 float APS5_VABI scalbnf_nid_postfix(float, int);
@@ -68,6 +69,7 @@ float APS5_VABI asinhf_nid_postfix(float);
 double APS5_VABI acosh_nid_postfix(double);
 float APS5_VABI acoshf_nid_postfix(float);
 double APS5_VABI atanh_nid_postfix(double);
+int APS5_VABI abs_nid_postfix(int);
 std::int64_t APS5_VABI lroundf_nid_postfix(float);
 std::int64_t APS5_VABI llround_nid_postfix(double);
 std::int64_t APS5_VABI llroundf_nid_postfix(float);
@@ -342,9 +344,54 @@ static void CheckFloatRounding(float value, std::int64_t expected, bool invalid)
     }
 }
 
+static void CheckAbsoluteValue() {
+    constexpr int maximum = std::numeric_limits<int>::max();
+    constexpr int minimum = std::numeric_limits<int>::min();
+    for (const int value : {-1, -42, -maximum}) Require(abs_nid_postfix(value) == -value);
+    Require(abs_nid_postfix(0) == 0);
+    for (const int value : {1, 42, maximum}) Require(abs_nid_postfix(value) == value);
+    Require(abs_nid_postfix(minimum) == minimum);
+}
+
+static void CheckIntegerPower() {
+    const auto infinity = std::numeric_limits<double>::infinity();
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    constexpr int maximum = std::numeric_limits<int>::max();
+    constexpr int minimum = std::numeric_limits<int>::min();
+    const auto close = [](double actual, double expected) {
+        return std::abs(actual - expected) <= 64 * std::numeric_limits<double>::epsilon() * std::abs(expected);
+    };
+    Require(__powidf2_nid_postfix(2., 10) == 1024. && __powidf2_nid_postfix(-2., 3) == -8. && __powidf2_nid_postfix(-2., 4) == 16.);
+    Require(__powidf2_nid_postfix(2., 1023) == std::ldexp(1., 1023) && __powidf2_nid_postfix(2., 1024) == infinity);
+    Require(__powidf2_nid_postfix(-1., maximum) == -1. && std::isnan(__powidf2_nid_postfix(nan, 2)));
+    for (const double base : {3., 0., -0., infinity, nan}) Require(__powidf2_nid_postfix(base, 0) == 1.);
+    Require(__powidf2_nid_postfix(2., -1) == 0.5 && __powidf2_nid_postfix(2., -2) == 0.25 && __powidf2_nid_postfix(-2., -3) == -0.125);
+    Require(__powidf2_nid_postfix(0., -1) == infinity && __powidf2_nid_postfix(-0., -1) == -infinity);
+    Require(__powidf2_nid_postfix(2., -1023) == std::pow(2., -1023) && __powidf2_nid_postfix(2., -1023) == std::ldexp(1., -1023));
+    Require(std::pow(2., -1024) == std::ldexp(1., -1024) && __powidf2_nid_postfix(2., -1024) == 0.);
+    Require(std::pow(2., -1074) == std::numeric_limits<double>::denorm_min() && __powidf2_nid_postfix(2., -1074) == 0.);
+    Require(__powidf2_nid_postfix(10., -400) == 0. && std::pow(10., -400) == 0.);
+    Require(__powidf2_nid_postfix(2., minimum) == 0. && __powidf2_nid_postfix(0.5, minimum) == infinity && __powidf2_nid_postfix(1., minimum) == 1.);
+    volatile double powerBase = 1.1;
+    const double square = powerBase * powerBase;
+    Require(__powidf2_nid_postfix(powerBase, 4) == square * square);
+    Require(__powidf2_nid_postfix(powerBase, 5) == powerBase * (square * square));
+    Require(__powidf2_nid_postfix(powerBase, -4) == 1. / (square * square));
+    for (const double base : {1.1, -0.7, 3.7, 1e-3}) {
+        for (int exponent = -40; exponent <= 40; ++exponent) {
+            if (!close(__powidf2_nid_postfix(base, exponent), std::pow(base, exponent))) {
+                std::fprintf(stderr, "Guest __powidf2 failed for %g^%d\n", base, exponent);
+                std::abort();
+            }
+        }
+    }
+}
+
 int main() {
     CheckFloatClassification();
     CheckIntegerConversions();
+    CheckAbsoluteValue();
+    CheckIntegerPower();
     Require(atof_nid_postfix(" -12.5tail") == -12.5);
     char* end = nullptr;
     const char input[] = "0x1.8p+2 remainder";
