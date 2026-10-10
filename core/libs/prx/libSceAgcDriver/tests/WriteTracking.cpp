@@ -245,9 +245,8 @@ void CheckHostHole() {
         return true;
     }) && imported, "an import into an arena host hole did not run");
     Require(!Watched(hole, bytes), "an import made an arena host hole watched");
+}
 
-// The write-watch prewalk: clean ranges of the last epoch are skipped, a page written before the
-// ordering point is never marked clean, and a write after a look is seen by the next epoch.
 void CheckPrewalk() {
     if (std::getenv("APS5_NO_PREWALK") != nullptr) return;
     void* memory = AllocateWatched(4 * Block);
