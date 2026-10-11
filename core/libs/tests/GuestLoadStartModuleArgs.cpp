@@ -47,8 +47,6 @@ int main(int argc, char** argv) {
     Seen seen = Load(module, events, 0, nullptr);
     Require(seen.args == 0 && seen.argp == 0);
 
-    // The first block with a size and a pointer is the process one. It is passed as given, and kept as the pointer
-    // because the engine fills it after the load that supplied it (PPSA13579 loads Il2CppUserAssemblies with an all-zero block).
     std::vector<std::uint8_t> engine(52, 0);
     const std::size_t engineAddress = Address(engine.data());
     seen = Load(module, events, engine.size(), engine.data());
@@ -58,14 +56,12 @@ int main(int argc, char** argv) {
     seen = Load(module, events, 0, nullptr);
     Require(seen.args == 52 && seen.argp == engineAddress && seen.sum == 52 * 0xAB);
 
-    // A later block is passed as given and does not replace the process one, since it may live on a stack.
     const std::vector<std::uint8_t> later(16, 0x11);
     seen = Load(module, events, later.size(), later.data());
     Require(seen.args == 16 && seen.argp == Address(later.data()) && seen.sum == 16 * 0x11);
     seen = Load(module, events, 0, nullptr);
     Require(seen.args == 52 && seen.argp == engineAddress && seen.sum == 52 * 0xAB);
 
-    // A zero size with a pointer, and a size without a pointer, are passed as given and are not replaced.
     seen = Load(module, events, 0, reinterpret_cast<const void*>(0x2000));
     Require(seen.args == 0 && seen.argp == 0x2000);
     seen = Load(module, events, 8, nullptr);
