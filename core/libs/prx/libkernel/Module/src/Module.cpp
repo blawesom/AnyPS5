@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include "SceTypes.hpp"
@@ -185,6 +186,15 @@ namespace {
 
 thread_local PendingModuleArgs pendingModuleArgs;
 thread_local int pendingModuleInitResult = 0;
+std::mutex processModuleArgsLock;
+PendingModuleArgs processModuleArgs;
+
+PendingModuleArgs ResolveModuleArgs(std::size_t args, const void* argp) {
+ std::lock_guard lock(processModuleArgsLock);
+ if (args != 0 && argp != nullptr && processModuleArgs.argp == nullptr) processModuleArgs = {args, argp};
+ if (args != 0 || argp != nullptr) return {args, argp};
+ return processModuleArgs;
+}
 
 }
 
@@ -205,7 +215,7 @@ KernelModule APS5_VABI sceKernelLoadStartModule(const char* module_file_name, si
  (void)opt;
  if (res) *res = 0;
  if (!module_file_name) return static_cast<KernelModule>(SCE_KERNEL_ERROR_EFAULT);
- pendingModuleArgs = {args, argp};
+ pendingModuleArgs = ResolveModuleArgs(args, argp);
  pendingModuleInitResult = 0;
  void* handle = dlopen_nid_postfix(module_file_name, kRtldNow);
  const int started = pendingModuleInitResult;
