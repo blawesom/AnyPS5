@@ -502,6 +502,10 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
     }
 }
 
+int APS5_VABI getdtablesize_nid_postfix(void) {
+    throw std::runtime_error("getdtablesize: the console's RLIMIT_NOFILE soft limit and kern.maxfilesperproc are not known");
+}
+
 int APS5_VABI sceKernelIsTrinityMode(void) {
     return 0;
 }
