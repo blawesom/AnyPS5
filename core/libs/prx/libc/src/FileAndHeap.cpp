@@ -6,6 +6,8 @@
 #include <optional>
 #include <filesystem>
 #include <limits>
+#include <new>
+#include <stdexcept>
 #include <utility>
 #include <cerrno>
 #include <cstring>
@@ -282,6 +284,17 @@ void APS5_VABI free_nid_postfix(void* ptr) {
 
 void* APS5_VABI realloc_nid_postfix(void* ptr, size_t newSize) {
     return ApplicationHeapReallocate_nid_no_patch(ptr, newSize);
+}
+
+void* APS5_VABI reallocf_nid_postfix(void* ptr, size_t newSize) {
+    try {
+        return ApplicationHeapReallocate_nid_no_patch(ptr, newSize);
+    } catch (const std::bad_alloc&) {
+    } catch (const std::length_error&) {
+    }
+    ApplicationHeapFree_nid_no_patch(ptr);
+    errno = 12;
+    return nullptr;
 }
 
 void* APS5_VABI memalign_nid_postfix(size_t alignment, size_t size) {
