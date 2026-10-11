@@ -33,7 +33,7 @@ namespace {
 
 #ifdef _WIN32
 bool ExceedsIntMax(char* buffer, size_t size) {
-    if (size <= static_cast<size_t>(INT_MAX)) return false;
+    if (size == 0 || size - 1 <= static_cast<size_t>(INT_MAX)) return false;
     if (buffer) buffer[0] = 0;
     errno = 84;
     return true;
