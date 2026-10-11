@@ -49,6 +49,7 @@ constexpr int errnoInvalidArgument = 22;
 constexpr unsigned freebsdWaitOptions = 0x8000003Fu;
 
 std::atomic<std::uint32_t> gpoBits{0};
+std::atomic<bool> credentialsChanged{false};
 constexpr std::array<std::uint8_t, 16> openPsId{'A', 'n', 'y', 'P', 'S', '5', 'O', 'p', 'e', 'n', 'P', 's', 'I', 'd', 0, 1};
 
 #ifdef _WIN32
@@ -122,6 +123,8 @@ constexpr std::size_t guestPathMax = 1024;
 constexpr std::size_t guestArgumentMax = 262144;
 constexpr std::uint16_t guestFileType = 0170000;
 constexpr std::uint16_t guestRegularFile = 0100000;
+constexpr std::uint32_t guestUnchangedId = 0xFFFFFFFFu;
+constexpr std::uint32_t guestGroupsMax = 1024;
 constexpr int guestRlimitData = 2;
 constexpr int guestRlimitCount = 15;
 constexpr std::int64_t guestRlimitInfinity = std::numeric_limits<std::int64_t>::max();
@@ -289,7 +292,7 @@ int APS5_VABI getegid_nid_postfix(void) {
 }
 
 int APS5_VABI issetugid_nid_postfix(void) {
-    return 0;
+    return credentialsChanged.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 void APS5_VABI exit_nid_postfix(int code) {
@@ -498,6 +501,31 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
     return 0;
 }
 
+int APS5_VABI setrlimit_nid_postfix(int resource, const GuestResourceLimit* limit) {
+    if (limit == nullptr) {
+        *__error_nid_postfix() = guestFault;
+        return -1;
+    }
+    if (resource < 0 || resource >= guestRlimitCount) {
+        *__error_nid_postfix() = guestInvalid;
+        return -1;
+    }
+    if (resource != guestRlimitData)
+        throw std::runtime_error("setrlimit: unsupported resource " + std::to_string(resource));
+    GuestResourceLimit requested = *limit;
+    if (requested.rlim_cur < 0)
+        requested.rlim_cur = guestRlimitInfinity;
+    if (requested.rlim_max < 0)
+        requested.rlim_max = guestRlimitInfinity;
+    if (requested.rlim_cur > requested.rlim_max)
+        requested.rlim_cur = requested.rlim_max;
+    GuestResourceLimit current{};
+    getrlimit_nid_postfix(resource, &current);
+    if (requested.rlim_cur != current.rlim_cur || requested.rlim_max != current.rlim_max)
+        throw std::runtime_error("setrlimit: changing the limit of resource " + std::to_string(resource) + " is not supported");
+    return 0;
+}
+
 int APS5_VABI sceKernelIsTrinityMode(void) {
     return 0;
 }
@@ -519,6 +547,40 @@ int APS5_VABI seteuid_nid_postfix(std::uint32_t euid) {
 int APS5_VABI setegid_nid_postfix(std::uint32_t egid) {
     if (egid != 0)
         throw std::runtime_error("setegid: unsupported group id " + std::to_string(egid));
+    return 0;
+}
+
+int APS5_VABI setuid_nid_postfix(std::uint32_t uid) {
+    if (uid != 0)
+        throw std::runtime_error("setuid: unsupported user id " + std::to_string(uid));
+    return 0;
+}
+
+int APS5_VABI setreuid_nid_postfix(std::uint32_t ruid, std::uint32_t euid) {
+    if ((ruid != 0 && ruid != guestUnchangedId) || (euid != 0 && euid != guestUnchangedId))
+        throw std::runtime_error("setreuid: unsupported user ids " + std::to_string(ruid) + ", " + std::to_string(euid));
+    return 0;
+}
+
+int APS5_VABI setregid_nid_postfix(std::uint32_t rgid, std::uint32_t egid) {
+    if ((rgid != 0 && rgid != guestUnchangedId) || (egid != 0 && egid != guestUnchangedId))
+        throw std::runtime_error("setregid: unsupported group ids " + std::to_string(rgid) + ", " + std::to_string(egid));
+    return 0;
+}
+
+int APS5_VABI setgroups_nid_postfix(int count, const std::uint32_t* groups) {
+    const auto size = static_cast<std::uint32_t>(count);
+    if (size > guestGroupsMax) {
+        *__error_nid_postfix() = guestInvalid;
+        return -1;
+    }
+    if (size != 0 && groups == nullptr) {
+        *__error_nid_postfix() = guestFault;
+        return -1;
+    }
+    if (size > 1 || (size == 1 && groups[0] != 0))
+        throw std::runtime_error("setgroups: only the group set {0} is supported");
+    credentialsChanged.store(true, std::memory_order_relaxed);
     return 0;
 }
 

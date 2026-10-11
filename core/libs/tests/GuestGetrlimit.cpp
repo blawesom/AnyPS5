@@ -13,6 +13,7 @@ struct ResourceLimit {
 };
 
 extern "C" int APS5_VABI getrlimit_nid_postfix(int resource, ResourceLimit* limit);
+extern "C" int APS5_VABI setrlimit_nid_postfix(int resource, const ResourceLimit* limit);
 extern "C" int* APS5_VABI __error_nid_postfix();
 
 static constexpr int GUEST_EFAULT = 14;
@@ -62,6 +63,41 @@ static void LoweredHostLimitIsReported() {
 }
 #endif
 
+static void RequireSetError(int resource, const ResourceLimit* limit, int error) {
+    *__error_nid_postfix() = 0;
+    Require(setrlimit_nid_postfix(resource, limit) == -1);
+    Require(*__error_nid_postfix() == error);
+}
+
+static bool SetThrows(int resource, ResourceLimit limit) {
+    try {
+        setrlimit_nid_postfix(resource, &limit);
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+static void CurrentLimitIsKept() {
+    const ResourceLimit current = GuestLimit(GUEST_RLIMIT_DATA);
+    *__error_nid_postfix() = 13;
+    Require(setrlimit_nid_postfix(GUEST_RLIMIT_DATA, &current) == 0);
+    Require(*__error_nid_postfix() == 13);
+    if (current.rlim_cur == current.rlim_max) {
+        const ResourceLimit above{GUEST_RLIM_INFINITY, current.rlim_max};
+        Require(setrlimit_nid_postfix(GUEST_RLIMIT_DATA, &above) == 0);
+        Require(SetThrows(GUEST_RLIMIT_DATA, {GUEST_RLIM_INFINITY, current.rlim_max - 1}));
+    }
+    if (current.rlim_cur == GUEST_RLIM_INFINITY && current.rlim_max == GUEST_RLIM_INFINITY) {
+        const ResourceLimit negative{-1, -2};
+        Require(setrlimit_nid_postfix(GUEST_RLIMIT_DATA, &negative) == 0);
+    }
+    if (current.rlim_cur > 0) Require(SetThrows(GUEST_RLIMIT_DATA, {current.rlim_cur - 1, current.rlim_max}));
+    if (current.rlim_max < GUEST_RLIM_INFINITY) Require(SetThrows(GUEST_RLIMIT_DATA, {current.rlim_cur, GUEST_RLIM_INFINITY}));
+    const ResourceLimit after = GuestLimit(GUEST_RLIMIT_DATA);
+    Require(after.rlim_cur == current.rlim_cur && after.rlim_max == current.rlim_max);
+}
+
 static void RequireUnsupported(int resource) {
     ResourceLimit limit{};
     bool rejected = false;
@@ -87,4 +123,13 @@ int main() {
     RequireError(GUEST_RLIMIT_DATA, nullptr, GUEST_EFAULT);
     RequireUnsupported(GUEST_RLIMIT_NOFILE);
     RequireUnsupported(GUEST_RLIMIT_AS);
+
+    CurrentLimitIsKept();
+    const ResourceLimit infinite{GUEST_RLIM_INFINITY, GUEST_RLIM_INFINITY};
+    RequireSetError(GUEST_RLIMIT_DATA, nullptr, GUEST_EFAULT);
+    RequireSetError(GUEST_RLIM_NLIMITS, nullptr, GUEST_EFAULT);
+    RequireSetError(GUEST_RLIM_NLIMITS, &infinite, GUEST_EINVAL);
+    RequireSetError(-1, &infinite, GUEST_EINVAL);
+    Require(SetThrows(GUEST_RLIMIT_NOFILE, infinite));
+    Require(SetThrows(GUEST_RLIMIT_AS, infinite));
 }
