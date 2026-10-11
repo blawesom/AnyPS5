@@ -12,6 +12,7 @@
 #include "prx/libkernel/File/include/FileLock.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include <cerrno>
 #include <cstring>
@@ -443,6 +444,7 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
 
 int APS5_VABI close_nid_postfix(int d) {
     if (d >= GuestSockets::FirstDescriptor) return GuestSockets::Close(d);
+    EqueueDescriptorClosed(d);
     File::ForgetRandomDevice(d);
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);
@@ -460,6 +462,7 @@ int APS5_VABI _close_nid_postfix(int descriptor) {
 int APS5_VABI dup_nid_postfix(int d) {
     if (d >= GuestSockets::FirstDescriptor) return GuestSockets::Duplicate(d);
     if (d < 0) return PosixFailure(GUEST_EBADF);
+    if (IsKqueueDescriptor(d)) throw std::runtime_error(std::string(__func__) + ": duplicating a kqueue descriptor is not supported");
 #ifdef _WIN32
     RejectDirectoryDuplicate(d, __func__);
     const int duplicate = WithoutParameterHandler([d] { return ::_dup(d); });
@@ -485,11 +488,13 @@ int APS5_VABI dup2_nid_postfix(int from, int to) {
     if (socketTo)
         throw std::runtime_error(std::string(__func__) + ": moving host descriptor " + std::to_string(from) + " into the guest socket range is not supported");
     const bool sourceIsRandom = File::IsRandomDevice(from);
+    if (from != to && IsKqueueDescriptor(from)) throw std::runtime_error(std::string(__func__) + ": duplicating a kqueue descriptor is not supported");
 #ifdef _WIN32
     if (WithoutParameterHandler([from] { return ::_get_osfhandle(from) == -1 ? -1 : 0; }) != 0) return PosixFailure(GUEST_EBADF);
     if (from == to) return to;
     RejectDirectoryDuplicate(from, __func__);
     if (WithoutParameterHandler([from, to] { return ::_dup2(from, to); }) != 0) return PosixFailure(SceErrorFromErrno(errno) & 0xffff);
+    EqueueDescriptorClosed(to);
     File::ForgetDirectoryDescriptor(to);
     File::ForgetFileLock(to);
     File::ForgetRandomDevice(to);
@@ -502,6 +507,7 @@ int APS5_VABI dup2_nid_postfix(int from, int to) {
     }
     const int result = ::dup2(from, to);
     if (result < 0) return PosixFailure(SceErrorFromErrno(errno) & 0xffff);
+    EqueueDescriptorClosed(to);
     File::ForgetRandomDevice(to);
     if (sourceIsRandom) File::RememberRandomDevice(to);
     return result;
