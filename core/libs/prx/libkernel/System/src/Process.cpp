@@ -45,6 +45,7 @@ namespace {
 constexpr int sceInvalidArgument = static_cast<int>(0x80020016u);
 constexpr int errnoNoChild = 10;
 constexpr int errnoInvalidArgument = 22;
+constexpr int errnoResultTooLarge = 34;
 constexpr unsigned freebsdWaitOptions = 0x8000003Fu;
 
 std::atomic<std::uint32_t> gpoBits{0};
@@ -259,6 +260,13 @@ int APS5_VABI getegid_nid_postfix(void) {
 
 int APS5_VABI issetugid_nid_postfix(void) {
     return 0;
+}
+
+int APS5_VABI getlogin_r_nid_postfix(char* name, int length) {
+    (void)name;
+    if (length < 1) return errnoResultTooLarge;
+    NotImplemented_nid_no_patch("getlogin_r: the login name of the console session");
+    return -1;
 }
 
 void APS5_VABI exit_nid_postfix(int code) {
