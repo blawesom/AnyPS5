@@ -10,9 +10,9 @@
 - winpthreads initializes a statically initialized rwlock on its first lock and fails a concurrent first lock with `EINVAL`, which `std::shared_mutex` and `std::shared_timed_mutex` ignore, so that lock does not exclude. Guest rwlocks ([Pthread.hpp](../../core/libs/prx/libkernel/Pthread/include/Pthread.hpp)) and the host `std::shared_mutex` objects in [Recompiler.cpp](../../core/shader/recompiler/Recompiler.cpp) are locked once when created. A new host `std::shared_mutex` used on Windows needs the same.
 
 ### Direct memory
-
 - Windows direct-memory backing reserves a paging-file section and commits each mapped guest page before setting its protection. Committed physical contents remain in the section across unmap/remap and are released when the backing and its remaining views are destroyed; commitment is not recovered merely by unmapping a page. Linux retains its existing backing. Peak gameplay memory and Windows versions other than the tested host remain unverified.
-
+- winpthreads initializes a statically initialized rwlock on its first lock and fails a concurrent first lock with `EINVAL`, which `std::shared_mutex` and `std::shared_timed_mutex` ignore, so that lock does not exclude. Guest rwlocks ([Pthread.hpp](../../core/libs/prx/libkernel/Pthread/include/Pthread.hpp)) are locked once when created. The host `std::shared_mutex` objects in [Recompiler.cpp](../../core/shader/recompiler/Recompiler.cpp) and [GuestWriteWatch.cpp](../../core/libs/prx/libc/src/GuestWriteWatch.cpp) are not, and can still race on their first contended use.
+- The `3rdparty/SPIRV-Headers` submodule predates `SPV_KHR_fma`, so [SpirvFma.hpp](../../core/shader/recompiler/SpirvFma.hpp) defines `OpFmaKHR` (4427) and the `FMAKHR` capability (6030) from the [SPIR-V registry](https://github.com/KhronosGroup/SPIRV-Registry/blob/main/extensions/KHR/SPV_KHR_fma.asciidoc) until the submodule is updated.
 ### Silent stubs
 
 Throughout the project, every function at every stage either **does exactly what it's supposed to or throws an exception**. Everywhere... except:

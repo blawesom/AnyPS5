@@ -1,4 +1,5 @@
 #include "BdaAbi.hpp"
+#include "SpirvFma.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PipelineSpecialization.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/VertexInput.hpp"
@@ -254,6 +255,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityFloat16 ||
                     capability == spv::CapabilityRoundingModeRTE ||
                     capability == spv::CapabilityDenormPreserve ||
+                    capability == ShaderRecompiler::SpirvCapabilityFmaKHR ||
                     capability == spv::CapabilityFloat64 ||
                     capability == spv::CapabilityStorageBuffer8BitAccess ||
                     capability == spv::CapabilityPhysicalStorageBufferAddresses ||
@@ -306,7 +308,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     Require(fragment && fragmentShaderBarycentric, "SPV_KHR_fragment_shader_barycentric requires enabled fragmentShaderBarycentric in a fragment shader");
                     break;
                 }
-                Require(extension == "SPV_KHR_float_controls" || (imageInt64Atomics && extension == "SPV_EXT_shader_image_int64") || (mesh && (extension == "SPV_EXT_mesh_shader" || extension == "SPV_KHR_physical_storage_buffer")) || (descriptorIndexing && extension == "SPV_EXT_descriptor_indexing") || (shader.bdaAbiVersion == ShaderRecompiler::BdaAbi::Version && (extension == "SPV_KHR_physical_storage_buffer" || extension == "SPV_KHR_8bit_storage")), "unsupported SPIR-V extension");
+                Require(extension == "SPV_KHR_float_controls" || extension == ShaderRecompiler::SpirvFmaExtension || (imageInt64Atomics && extension == "SPV_EXT_shader_image_int64") || (mesh && (extension == "SPV_EXT_mesh_shader" || extension == "SPV_KHR_physical_storage_buffer")) || (descriptorIndexing && extension == "SPV_EXT_descriptor_indexing") || (shader.bdaAbiVersion == ShaderRecompiler::BdaAbi::Version && (extension == "SPV_KHR_physical_storage_buffer" || extension == "SPV_KHR_8bit_storage")), "unsupported SPIR-V extension");
                 break;
             }
             case spv::OpDecorateId:

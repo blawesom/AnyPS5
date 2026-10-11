@@ -12,6 +12,7 @@
 #include "SpirvBackend/SpirvSpecialization.hpp"
 #include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include "ShaderDiskCache.hpp"
+#include "SpirvFma.hpp"
 #include <list>
 #include <functional>
 #include <map>
@@ -177,6 +178,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     translateOptions.fragmentShaderBarycentricEnabled = request.target.fragmentShaderBarycentricEnabled;
     const auto supports = [&](spv::Capability capability) { return std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(capability)) != request.target.supportedCapabilities.end(); };
     translateOptions.nativeFloat16 = supports(spv::CapabilityFloat16) && supports(spv::CapabilityRoundingModeRTE) && supports(spv::CapabilityDenormPreserve);
+    translateOptions.nativeFloat16Fma = translateOptions.nativeFloat16 && supports(SpirvCapabilityFmaKHR);
     translateOptions.floatMode = request.context.floatMode;
     translateOptions.inputInfo = inputInfo;
 

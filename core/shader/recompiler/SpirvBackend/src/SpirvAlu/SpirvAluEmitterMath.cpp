@@ -2,6 +2,7 @@
 #include "SpirvBackend/SpirvMemory/SpirvSubgroup.hpp"
 #include "IntermediateRepresentation/IrBlock.hpp"
 #include "IntermediateRepresentation/IrValue.hpp"
+#include "SpirvFma.hpp"
 #include <spirv/unified1/GLSL.std.450.h>
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
@@ -1450,6 +1451,16 @@ std::uint32_t EmitFPMul16x2(SpirvEmitterState& state, std::uint32_t arg0, std::u
     const auto f16x2 = TypeF16x2(state);
     const auto product = Binary(state, spv::OpFMul, f16x2, Unary(state, spv::OpBitcast, f16x2, arg0), Unary(state, spv::OpBitcast, f16x2, arg1));
     return Unary(state, spv::OpBitcast, TypeU32(state), Exact(state, product));
+}
+
+std::uint32_t EmitFPFma16x2(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2) {
+    const auto f16x2 = TypeF16x2(state);
+    if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(SpirvCapabilityFmaKHR)) == state.supportedCapabilities.end()) FailEmit("packed f16 fma needs FMAKHR");
+    state.module.EmitCapability(SpirvCapabilityFmaKHR);
+    state.module.EmitExtension(SpirvFmaExtension);
+    const auto result = state.module.AllocateId();
+    state.module.AddFunction(SpirvOpFmaKHR, f16x2, result, Unary(state, spv::OpBitcast, f16x2, arg0), Unary(state, spv::OpBitcast, f16x2, arg1), Unary(state, spv::OpBitcast, f16x2, arg2));
+    return Unary(state, spv::OpBitcast, TypeU32(state), Exact(state, result));
 }
 
 std::uint32_t EmitF32ToF16BitsRte(SpirvEmitterState& state, std::uint32_t value) {
