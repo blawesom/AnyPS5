@@ -232,6 +232,7 @@ static std::atomic_flag sharedPtrSpinLock;
 extern "C" {
 int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value);
 int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t** source, std::size_t limit, void* state);
+[[noreturn]] void ThrowCppError_nid_no_patch(int code);
 }
 
 static KernelTimespec XtimeDeadline(const Xtime& time) {
@@ -851,9 +852,8 @@ int APS5_VABI _ZNSt8ios_base7_AddstdEPS__nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+[[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code) {
+    ThrowCppError_nid_no_patch(code);
 }
 
 int APS5_VABI _Thrd_join_nid_postfix(Pthread thread, int* code) {
