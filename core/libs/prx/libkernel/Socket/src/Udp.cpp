@@ -16,6 +16,8 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
+#include "prx/libkernel/File/include/DescriptorPoll.hpp"
+#include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include <algorithm>
 #include <chrono>
@@ -307,12 +309,45 @@ struct PollFlag {
     short guest;
     short native;
 };
+constexpr short GuestPollIn = 0x1;
 constexpr short GuestPollPriority = 0x2;
+constexpr short GuestPollOut = 0x4;
+constexpr short GuestPollError = 0x8;
+constexpr short GuestPollHangUp = 0x10;
 constexpr short GuestPollInvalid = 0x20;
+constexpr short GuestPollReadNormal = 0x40;
 constexpr short GuestPollAccepted = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40 | 0x80 | 0x100;
+constexpr std::uint32_t GuestPollSetSize = 1024;
+constexpr int HostPollSliceMilliseconds = 100;
 constexpr PollFlag RequestFlags[] = {
     {0x1, POLLIN}, {0x2, POLLPRI}, {0x4, POLLOUT}, {0x40, POLLRDNORM}, {0x80, POLLRDBAND}, {0x100, POLLWRBAND}};
-constexpr PollFlag StatusFlags[] = {{0x8, POLLERR}, {0x10, POLLHUP}, {GuestPollInvalid, POLLNVAL}};
+constexpr PollFlag StatusFlags[] = {{GuestPollError, POLLERR}, {GuestPollHangUp, POLLHUP}, {GuestPollInvalid, POLLNVAL}};
+short HostPollRequest(short events) {
+    short request = 0;
+    if (events & (GuestPollIn | GuestPollReadNormal)) request |= KernelSocketPoll::Readable;
+    if (events & GuestPollPriority) request |= KernelSocketPoll::Urgent;
+    if (events & GuestPollOut) request |= KernelSocketPoll::Writable;
+    return request;
+}
+short HostPollResult(short events, short polled) {
+    if (polled & KernelSocketPoll::Unknown) return GuestPollInvalid;
+    short revents = 0;
+    if (polled & KernelSocketPoll::Readable) revents |= events & (GuestPollIn | GuestPollReadNormal);
+    if (polled & KernelSocketPoll::Urgent) revents |= events & GuestPollPriority;
+    if (polled & KernelSocketPoll::Writable) revents |= events & GuestPollOut;
+    if (polled & KernelSocketPoll::Error) revents |= GuestPollError;
+    if (polled & KernelSocketPoll::HangUp) revents |= GuestPollHangUp;
+    return revents;
+}
+int MarkClosedHostDescriptors(std::vector<KernelSocketPoll::Entry>& host) {
+    int closed = 0;
+    for (auto& entry : host) {
+        entry.revents = DescriptorIsOpen_nid_no_patch(entry.descriptor) ? 0 : KernelSocketPoll::Unknown;
+        if (entry.revents != 0) ++closed;
+    }
+    if (closed == 0) throw std::runtime_error("poll: the host reported a closed descriptor that is open again");
+    return closed;
+}
 std::shared_ptr<Socket> Find(int descriptor) {
     std::lock_guard lock(socketsMutex);
     const auto found = sockets.find(descriptor);
@@ -854,23 +889,35 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
 }
 int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t count, int timeout) {
     if (timeout < -1) return Fail(22);
+    if (count > GuestPollSetSize)
+        throw std::runtime_error("poll: " + std::to_string(count) + " descriptors exceed FD_SETSIZE and the console's maxfilesperproc is unknown");
     if (count && !descriptors) return Fail(14);
     std::vector<std::shared_ptr<Socket>> held;
     std::vector<NativePollDescriptor> native;
     std::vector<std::uint32_t> owners;
-    int ready = 0;
+    std::vector<KernelSocketPoll::Entry> host;
+    std::vector<std::uint32_t> hostOwners;
+    int invalid = 0;
     for (std::uint32_t i = 0; i < count; ++i) {
         auto& entry = descriptors[i];
         entry.revents = 0;
         if (entry.descriptor < 0) continue;
         if ((entry.events & ~GuestPollAccepted) != 0)
             throw std::runtime_error("poll: unsupported event flags " + std::to_string(entry.events));
-        if (entry.descriptor < GuestSockets::FirstDescriptor)
-            throw std::runtime_error("poll: descriptor " + std::to_string(entry.descriptor) + " is not a socket");
+        if (entry.descriptor < GuestSockets::FirstDescriptor) {
+            if (DescriptorIsOpen_nid_no_patch(entry.descriptor)) {
+                host.push_back({entry.descriptor, HostPollRequest(entry.events), 0});
+                hostOwners.push_back(i);
+            } else {
+                entry.revents = GuestPollInvalid;
+                ++invalid;
+            }
+            continue;
+        }
         auto socket = Find(entry.descriptor);
         if (!socket) {
             entry.revents = GuestPollInvalid;
-            ++ready;
+            ++invalid;
             continue;
         }
 #ifdef _WIN32
@@ -884,29 +931,57 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
         owners.push_back(i);
         held.push_back(std::move(socket));
     }
-    if (native.empty()) {
-        if (ready || timeout == 0) return ready;
-        if (timeout < 0) throw std::runtime_error("poll: an infinite wait without sockets never returns");
+    if (native.empty() && host.empty()) {
+        if (invalid || timeout == 0) return invalid;
+        if (timeout < 0) throw std::runtime_error("poll: an infinite wait without descriptors never returns");
         std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
         return 0;
     }
-    const int wait = ready ? 0 : timeout;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max(timeout, 0));
+    for (;;) {
+        int wait = 0;
+        if (invalid == 0 && timeout < 0) {
+            wait = host.empty() ? -1 : HostPollSliceMilliseconds;
+        } else if (invalid == 0) {
+            const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            wait = static_cast<int>(std::clamp<std::int64_t>(remaining, 0, host.empty() ? INT_MAX : HostPollSliceMilliseconds));
+        }
+        int hostReady = 0;
+        if (!host.empty()) {
+            hostReady = File::PollHostDescriptors(host.data(), static_cast<int>(host.size()), native.empty() ? wait : 0, "poll");
+            if (hostReady < 0) hostReady = MarkClosedHostDescriptors(host);
+        }
+        if (!native.empty()) {
+            for (auto& request : native) request.revents = 0;
+            const int socketWait = hostReady ? 0 : wait;
 #ifdef _WIN32
-    const int result = WSAPoll(native.data(), static_cast<ULONG>(native.size()), wait);
+            const int result = WSAPoll(native.data(), static_cast<ULONG>(native.size()), socketWait);
 #else
-    const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), wait);
+            const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), socketWait);
 #endif
-    if (result < 0) return Fail(NativeError());
-    for (std::size_t i = 0; i < native.size(); ++i) {
-        auto& entry = descriptors[owners[i]];
-        for (const auto& flag : RequestFlags)
-            if ((entry.events & flag.guest) && (native[i].revents & flag.native))
-                entry.revents = static_cast<short>(entry.revents | flag.guest);
-        for (const auto& flag : StatusFlags)
-            if (native[i].revents & flag.native) entry.revents = static_cast<short>(entry.revents | flag.guest);
-        if (entry.revents) ++ready;
+            if (result < 0) return Fail(NativeError());
+        }
+        for (std::size_t i = 0; i < host.size(); ++i) {
+            auto& entry = descriptors[hostOwners[i]];
+            entry.revents = HostPollResult(entry.events, host[i].revents);
+        }
+        for (std::size_t i = 0; i < native.size(); ++i) {
+            auto& entry = descriptors[owners[i]];
+            entry.revents = 0;
+            for (const auto& flag : RequestFlags)
+                if ((entry.events & flag.guest) && (native[i].revents & flag.native))
+                    entry.revents = static_cast<short>(entry.revents | flag.guest);
+            for (const auto& flag : StatusFlags)
+                if (native[i].revents & flag.native) entry.revents = static_cast<short>(entry.revents | flag.guest);
+        }
+        int ready = 0;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            auto& entry = descriptors[i];
+            if (entry.revents & GuestPollHangUp) entry.revents = static_cast<short>(entry.revents & ~GuestPollOut);
+            if (entry.revents) ++ready;
+        }
+        if (ready || timeout == 0 || (timeout > 0 && std::chrono::steady_clock::now() >= deadline)) return ready;
     }
-    return ready;
 }
 }
 
