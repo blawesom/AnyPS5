@@ -908,6 +908,22 @@ int main() {
         const auto stats = b.eliminateStats();
         return stats.removedSelects == 0u && stats.analysisWorkBudget != 0u && stats.analysisWork == stats.analysisWorkBudget;
     });
+
+    passed &= run("a later bounded masked-lane proof can still remove its select", [] {
+        Builder b;
+        auto& wide = b.mask(32u);
+        auto& exec = b.logicalAnd(wide, b.mask(16u));
+        auto& old = b.lane();
+        auto& proven = b.select(exec, b.add(old, 1u), old);
+        auto& uncertain = b.select(exec, b.add(proven, 2u), old);
+        IrValue* observed = &uncertain;
+        for (std::uint32_t index = 0; index < 32u; ++index) observed = &b.add(*observed, index + 3u);
+        auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {observed, &old});
+        auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+        auto& texel = b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {observed, &old, &old, &old});
+        b.emit(IrOpcode::ImageWrite, IrType::Void, {&image, &address, &texel, &wide});
+        const auto stats = b.eliminateStats();
+        return stats.removedSelects == 1u && removed(proven) && !removed(uncertain) && stats.analysisWork > 0u && stats.analysisWork < stats.analysisWorkBudget;
     });
 
     return passed ? 0 : 1;
