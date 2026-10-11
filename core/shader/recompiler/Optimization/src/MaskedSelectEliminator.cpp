@@ -2,6 +2,7 @@
 #include "Optimization/DeadCodeEliminator.hpp"
 #include "RdnaDecoder/RdnaInstruction.hpp"
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -13,6 +14,7 @@ namespace {
 
 constexpr std::size_t MinimumWalkLimit = 4096;
 constexpr std::size_t WalkLimitPerInstruction = 2;
+constexpr std::size_t WalkBudgetMultiple = 32;
 constexpr std::uint32_t DepthLimit = 8;
 
 bool isSelect(IrOpcode opcode) {
@@ -542,14 +544,28 @@ std::size_t walkLimit(const IrProgram& program) {
     return std::max(MinimumWalkLimit, WalkLimitPerInstruction * instructions);
 }
 
+std::size_t walkBudget(const IrProgram& program) {
+    const auto limit = walkLimit(program);
+    if (limit > std::numeric_limits<std::size_t>::max() / WalkBudgetMultiple) return std::numeric_limits<std::size_t>::max();
+    return limit * WalkBudgetMultiple;
+}
+
 class MaskedLaneWalk {
 public:
-    MaskedLaneWalk(const IrProgram& program, const std::vector<Region>& regions, std::uint32_t nesting = 0) : program(program), regions(regions), uniform(uniformEntryBlocks(program)), limit(walkLimit(program)), implications(regions, uniform, program.WaveSize(), work), nesting(nesting) {}
+    MaskedLaneWalk(const IrProgram& program, const std::vector<Region>& regions, std::uint32_t nesting = 0) : program(program), regions(regions), uniform(uniformEntryBlocks(program)), limit(walkLimit(program)), remaining(walkBudget(program)), budget(remaining), implications(regions, uniform, program.WaveSize(), work), nesting(nesting) {}
 
     bool UnobservedWhereMasked(const IrValue& select, const IrValue* mask) {
+        if (remaining == 0) return false;
+        const auto allowance = std::min(limit, remaining);
         const bool acrossLoops = mask->HasImmediate() || regionOf(regions, mask->Parent()) == Region::Once;
         const bool sameIteration = !acrossLoops && select.Opcode() == IrOpcode::ReadFirstLane;
-        work = limit;
+        work = allowance;
+        struct ChargeWork {
+            std::size_t& remaining;
+            std::size_t& work;
+            std::size_t allowance;
+            ~ChargeWork() { remaining -= allowance - work; }
+        } charge{remaining, work, allowance};
         implications.Reset(mask, acrossLoops);
         const bool quadMasked = program.Resources().stage == IrShaderStage::Pixel && wholeQuadSource(mask, program.WaveSize()) != nullptr;
         startVisits();
@@ -583,6 +599,9 @@ public:
         return true;
     }
 
+    std::size_t WorkUsed() const { return budget - remaining; }
+    std::size_t WorkBudget() const { return budget; }
+
 private:
     void startVisits() {
         if (++epoch != 0u) return;
@@ -602,6 +621,8 @@ private:
     const std::vector<Region>& regions;
     BlockSet uniform;
     std::size_t limit;
+    std::size_t remaining;
+    std::size_t budget;
     std::size_t work = 0;
     Implications implications;
     std::vector<const IrValue*> pending;
@@ -639,6 +660,8 @@ MaskedSelectEliminationStats MaskedSelectEliminator::Eliminate(IrProgram& progra
         }
         if (changed) DeadCodeEliminator{}.Eliminate(program);
     }
+    stats.analysisWork = walk.WorkUsed();
+    stats.analysisWorkBudget = walk.WorkBudget();
     return stats;
 }
 

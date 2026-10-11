@@ -103,8 +103,12 @@ struct Builder {
         (void)emit(IrOpcode::ReferenceU32, IrType::Void, {&value});
     }
 
+    MaskedSelectEliminationStats eliminateStats() {
+        return MaskedSelectEliminator{}.Eliminate(program);
+    }
+
     std::uint32_t eliminate() {
-        return MaskedSelectEliminator{}.Eliminate(program).removedSelects;
+        return eliminateStats().removedSelects;
     }
 };
 
@@ -889,6 +893,21 @@ int main() {
         auto& next = b.select(b.mask(32u), b.add(written, 2u), old);
         b.keep(next);
         return b.eliminate() == 0u && !removed(written);
+    });
+
+    passed &= run("masked-lane implication work stays within a shader-wide budget", [] {
+        Builder b;
+        auto& exec = b.mask(16u);
+        auto* value = &b.lane();
+        for (std::uint32_t index = 0; index < 200u; ++index) {
+            auto& active = b.add(*value, index + 1u);
+            value = &b.select(exec, active, *value);
+        }
+        for (std::uint32_t index = 0; index < 2000u; ++index) value = &b.add(*value, index + 1u);
+        b.keep(*value);
+        const auto stats = b.eliminateStats();
+        return stats.removedSelects == 0u && stats.analysisWorkBudget != 0u && stats.analysisWork == stats.analysisWorkBudget;
+    });
     });
 
     return passed ? 0 : 1;
