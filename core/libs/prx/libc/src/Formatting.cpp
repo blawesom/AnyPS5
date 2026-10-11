@@ -1,3 +1,4 @@
+#include <climits>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -29,6 +30,15 @@ int __isoc99_vfscanf(std::FILE*, const char*, std::va_list);
 #endif
 
 namespace {
+
+#ifdef _WIN32
+bool ExceedsIntMax(char* buffer, size_t size) {
+    if (size <= static_cast<size_t>(INT_MAX)) return false;
+    if (buffer) buffer[0] = 0;
+    errno = 84;
+    return true;
+}
+#endif
 
 #ifndef _WIN32
 bool HasGuestWideFormat(const char* format) {
@@ -316,6 +326,7 @@ int APS5_VABI libc_printf_nid_postfix(const char* format, ...) {
 }
 
 int APS5_VABI snprintf_nid_postfix(char* buffer, size_t size, const char* format, ...) {
+    if (ExceedsIntMax(buffer, size)) return -1;
     __builtin_sysv_va_list args;
     __builtin_sysv_va_start(args, format);
     const int result = LibcDetail::FormatWindows(buffer, size, format, args);
@@ -450,6 +461,7 @@ int APS5_VABI vsprintf_nid_postfix(char* str, const char* format, VaList* args) 
 
 int APS5_VABI vsnprintf_nid_postfix(char* str, size_t size, const char* format, VaList* c) {
 #ifdef _WIN32
+    if (ExceedsIntMax(str, size)) return -1;
     return LibcDetail::FormatWindows(str, size, format, c);
 #else
     if (HasGuestWideFormat(format)) return LibcDetail::FormatWindows(str, size, format, c);
