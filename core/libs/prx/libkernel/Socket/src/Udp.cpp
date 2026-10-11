@@ -287,6 +287,11 @@ int GuestSockets::Family(int descriptor) {
     const auto found = sockets.find(descriptor);
     return found == sockets.end() ? -1 : found->second->family;
 }
+int GuestSockets::Type(int descriptor) {
+    std::lock_guard lock(socketsMutex);
+    const auto found = sockets.find(descriptor);
+    return found == sockets.end() ? -1 : found->second->type;
+}
 
 extern "C" bool GuestSocketIsOpen_nid_no_patch(int descriptor) {
     return GuestSockets::IsOpen(descriptor);
@@ -448,6 +453,14 @@ int UnnamedAddress(void* address, std::uint32_t* length) {
     std::memcpy(address, bytes, *length);
     return 0;
 }
+}
+
+bool GuestSockets::Connected(int descriptor) {
+    const auto socket = Find(descriptor);
+    if (!socket) return false;
+    sockaddr_storage peer{};
+    socklen_t size = sizeof(peer);
+    return ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &size) == 0;
 }
 
 bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* eof) {

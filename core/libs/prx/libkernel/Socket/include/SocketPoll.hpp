@@ -16,6 +16,7 @@ struct Entry {
 };
 
 using Poller = int (*)(Entry* entries, int count, int timeoutMilliseconds);
+bool IsNetSocket(int descriptor);
 }
 
 extern "C" void KernelSetSocketPoller_nid_no_patch(KernelSocketPoll::Poller poller);

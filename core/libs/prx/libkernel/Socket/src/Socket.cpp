@@ -40,6 +40,15 @@ void ClearDescriptor(void* set, int descriptor) {
 
 }
 
+bool KernelSocketPoll::IsNetSocket(int descriptor) {
+    const auto poller = g_socketPoller.load();
+    if (poller == nullptr) return false;
+    Entry entry{descriptor, Writable, 0};
+    const int result = poller(&entry, 1, 0);
+    if (result < 0) throw std::runtime_error("libSceNet socket lookup of descriptor " + std::to_string(descriptor) + " failed, guest errno " + std::to_string(-result));
+    return (entry.revents & Unknown) == 0;
+}
+
 extern "C" {
 
 const char* APS5_VABI __inet_ntop_nid_postfix(int family, const void* source, char* destination, std::uint32_t capacity);

@@ -1,8 +1,25 @@
-#include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/General.hpp"
+#include "prx/libkernel/File/include/FileFlags.hpp"
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+struct GuestIovec {
+    const void* base;
+    std::uint64_t length;
+};
+
+struct GuestHeaderTrailer {
+    const GuestIovec* headers;
+    int headerCount;
+    const GuestIovec* trailers;
+    int trailerCount;
+};
 
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
@@ -16,11 +33,117 @@ std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 int APS5_VABI getpeername_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI shutdown_nid_postfix(int, int);
 int APS5_VABI close_nid_postfix(int);
+int APS5_VABI fcntl_nid_postfix(int, int, ...);
+int APS5_VABI setsockopt_nid_postfix(int, int, int, const void*, std::uint32_t);
+int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
+std::int64_t APS5_VABI lseek_nid_postfix(int, std::int64_t, int);
+int APS5_VABI sendfile_nid_postfix(int, int, std::int64_t, std::uint64_t, const GuestHeaderTrailer*, std::int64_t*, int);
 int* APS5_VABI __error_nid_postfix();
 }
 
 static void Require(bool condition) {
     if (!condition) std::abort();
+}
+
+static std::string Pattern(std::size_t length) {
+    std::string bytes(length, '\0');
+    for (std::size_t i = 0; i < length; ++i) bytes[i] = static_cast<char>((i * 131 + i / 251) & 0xff);
+    return bytes;
+}
+
+static std::string Receive(int socket, std::size_t length) {
+    std::string bytes(length, '\0');
+    for (std::size_t done = 0; done < length;) {
+        const auto received = recv_nid_postfix(socket, bytes.data() + done, length - done, 0);
+        Require(received > 0);
+        done += static_cast<std::size_t>(received);
+    }
+    return bytes;
+}
+
+static void RequireSendFile(int file, int client, int accepted, std::int64_t offset, std::uint64_t nbytes,
+    const GuestHeaderTrailer* hdtr, int flags, const std::string& expected) {
+    std::int64_t sent = -1;
+    Require(sendfile_nid_postfix(file, client, offset, nbytes, hdtr, &sent, flags) == 0);
+    Require(sent == static_cast<std::int64_t>(expected.size()));
+    Require(Receive(accepted, expected.size()) == expected);
+}
+
+static void RequireSendFileFailure(int file, int socket, std::int64_t offset, int error, std::int64_t reported) {
+    std::int64_t sent = 99;
+    *__error_nid_postfix() = 0;
+    Require(sendfile_nid_postfix(file, socket, offset, 0, nullptr, &sent, 0) == -1);
+    Require(*__error_nid_postfix() == error && sent == reported);
+}
+
+static void SendFileCases(int client, int accepted) {
+    const auto root = std::filesystem::temp_directory_path() /
+        ("anyps5-sendfile-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directory(root));
+    const auto content = Pattern(10000);
+    const auto large = Pattern(16 * 1024 * 1024);
+    std::ofstream(root / "file.bin", std::ios::binary) << content;
+    std::ofstream(root / "large.bin", std::ios::binary) << large;
+    AddPathAlias_nid_no_patch("/anyps5-sendfile-test", root.string().c_str());
+    const int file = sceKernelOpen("/anyps5-sendfile-test/file.bin", SCE_KERNEL_O_RDONLY, 0);
+    Require(file >= 0);
+
+    RequireSendFile(file, client, accepted, 0, 0, nullptr, 0, content);
+    RequireSendFile(file, client, accepted, 4000, 0, nullptr, 0, content.substr(4000));
+    RequireSendFile(file, client, accepted, 2500, 1000, nullptr, 0, content.substr(2500, 1000));
+    RequireSendFile(file, client, accepted, 9500, 2000, nullptr, 0, content.substr(9500));
+    RequireSendFile(file, client, accepted, 10000, 0, nullptr, 0, "");
+    RequireSendFile(file, client, accepted, 20000, 5, nullptr, 0, "");
+    const GuestIovec headers[] = {{"HEAD", 4}, {nullptr, 0}, {"ER:", 3}};
+    const GuestIovec trailers[] = {{":TRAIL", 6}};
+    const GuestHeaderTrailer hdtr{headers, 3, trailers, 1};
+    RequireSendFile(file, client, accepted, 100, 50, &hdtr, 0x1 | 0x4 | 0x10, "HEADER:" + content.substr(100, 50) + ":TRAIL");
+    const GuestHeaderTrailer headersOnly{headers, 3, nullptr, 7};
+    RequireSendFile(file, client, accepted, 9990, 0, &headersOnly, 0x10000, "HEADER:" + content.substr(9990));
+    Require(sendfile_nid_postfix(file, client, 0, 10, nullptr, nullptr, 0) == 0);
+    Require(Receive(accepted, 10) == content.substr(0, 10));
+    Require(lseek_nid_postfix(file, 0, 1) == 0);
+
+    const GuestHeaderTrailer tooMany{headers, 1025, nullptr, 0};
+    std::int64_t sent = 99;
+    Require(sendfile_nid_postfix(file, client, 0, 0, &tooMany, &sent, 0) == -1 && *__error_nid_postfix() == 22 && sent == 99);
+    RequireSendFileFailure(file, client, -1, 22, 99);
+    const int other = sceKernelOpen("/anyps5-sendfile-test/file.bin", SCE_KERNEL_O_RDONLY, 0);
+    Require(other >= 0);
+    RequireSendFileFailure(file, other, 0, 38, 0);
+    const int writeOnly = sceKernelOpen("/anyps5-sendfile-test/file.bin", SCE_KERNEL_O_WRONLY, 0);
+    Require(writeOnly >= 0);
+    RequireSendFileFailure(writeOnly, client, 0, 9, 99);
+    Require(close_nid_postfix(writeOnly) == 0);
+    Require(close_nid_postfix(other) == 0);
+    RequireSendFileFailure(other, client, 0, 9, 99);
+    RequireSendFileFailure(client, accepted, 0, 22, 0);
+    RequireSendFileFailure(file, 0x7ffffff0, 0, 9, 0);
+    const int datagram = socket_nid_postfix(2, 2, 0);
+    Require(datagram >= 0);
+    RequireSendFileFailure(file, datagram, 0, 22, 0);
+    Require(close_nid_postfix(datagram) == 0);
+    const int unconnected = socket_nid_postfix(2, 1, 0);
+    Require(unconnected >= 0);
+    RequireSendFileFailure(file, unconnected, 0, 57, 0);
+    Require(close_nid_postfix(unconnected) == 0);
+
+    const int big = sceKernelOpen("/anyps5-sendfile-test/large.bin", SCE_KERNEL_O_RDONLY, 0);
+    Require(big >= 0);
+    const int sendBuffer = 16384;
+    Require(setsockopt_nid_postfix(client, 0xffff, 0x1001, &sendBuffer, sizeof(sendBuffer)) == 0);
+    Require(fcntl_nid_postfix(client, 4, 4) == 0);
+    const GuestIovec header[] = {{"H", 1}};
+    const GuestHeaderTrailer headerAndTrailer{header, 1, trailers, 1};
+    sent = -1;
+    *__error_nid_postfix() = 0;
+    Require(sendfile_nid_postfix(big, client, 0, 0, &headerAndTrailer, &sent, 0) == -1 && *__error_nid_postfix() == 35);
+    Require(sent > 1 && sent < static_cast<std::int64_t>(large.size()));
+    Require(Receive(accepted, static_cast<std::size_t>(sent)) == "H" + large.substr(0, static_cast<std::size_t>(sent) - 1));
+    Require(fcntl_nid_postfix(client, 4, 0) == 0);
+    Require(close_nid_postfix(big) == 0);
+    Require(close_nid_postfix(file) == 0);
+    std::filesystem::remove_all(root);
 }
 
 int main() {
@@ -47,6 +170,7 @@ int main() {
     address_size = connected_peer.size();
     Require(getpeername_nid_postfix(accepted, connected_peer.data(), &address_size) == 0);
     Require(address_size == 16 && connected_peer[1] == 2);
+    SendFileCases(client, accepted);
 
     const char request[] = "guest TCP loopback";
     char received[sizeof(request)]{};
