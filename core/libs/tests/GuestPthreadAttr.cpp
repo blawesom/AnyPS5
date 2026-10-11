@@ -48,6 +48,7 @@ struct ReportedAttributes {
 extern "C" {
 int APS5_VABI pthread_attr_setstack_nid_postfix(PthreadAttr* attr, void* addr, std::size_t size);
 int APS5_VABI pthread_attr_getstack_nid_postfix(const PthreadAttr* attr, void** addr, std::size_t* size);
+int APS5_VABI pthread_attr_getstackaddr_nid_postfix(const PthreadAttr* attr, void** addr);
 }
 
 static ReportedAttributes Query(Pthread thread) {
@@ -151,6 +152,18 @@ int main() {
     std::size_t reportedSize = 0;
     Require(pthread_attr_getstack_nid_postfix(&stackAttr, &reportedAddress, &reportedSize) == 0);
     Require(reportedAddress == &stackMarker && reportedSize == STACK_SIZE);
+    void* reportedOnly = nullptr;
+    Require(pthread_attr_getstackaddr_nid_postfix(&stackAttr, &reportedOnly) == 0);
+    Require(reportedOnly == &stackMarker);
+    Require(pthread_attr_getstackaddr_nid_postfix(&stackAttr, nullptr) == 22);
+    Require(pthread_attr_getstackaddr_nid_postfix(nullptr, &reportedOnly) == 22);
     Require(scePthreadAttrDestroy(&stackAttr) == SCE_OK);
     Require(pthread_attr_setstack_nid_postfix(&stackAttr, &stackMarker, STACK_SIZE) == 22);
+    Require(pthread_attr_getstackaddr_nid_postfix(&stackAttr, &reportedOnly) == 22);
+    PthreadAttr defaultAttr = nullptr;
+    Require(scePthreadAttrInit(&defaultAttr) == SCE_OK);
+    reportedOnly = &stackMarker;
+    Require(pthread_attr_getstackaddr_nid_postfix(&defaultAttr, &reportedOnly) == 0);
+    Require(reportedOnly == nullptr);
+    Require(scePthreadAttrDestroy(&defaultAttr) == SCE_OK);
 }

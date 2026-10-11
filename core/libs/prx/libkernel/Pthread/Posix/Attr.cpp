@@ -67,6 +67,12 @@ int APS5_VABI pthread_attr_getstack_nid_postfix(const PthreadAttr* __restrict at
     return 0;
 }
 
+int APS5_VABI pthread_attr_getstackaddr_nid_postfix(const PthreadAttr* attr, void** stack_addr) {
+    if (!Valid(attr) || !stack_addr) return PosixThread::GUEST_EINVAL;
+    *stack_addr = (*attr)->stackAddress;
+    return 0;
+}
+
 int APS5_VABI pthread_attr_getstacksize_nid_postfix(const PthreadAttr* attr, size_t* stack_size) {
     if (!Valid(attr) || !stack_size) return PosixThread::GUEST_EINVAL;
     *stack_size = (*attr)->_stacksize;
