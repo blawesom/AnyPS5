@@ -1,10 +1,12 @@
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstddef>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <thread>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -25,11 +27,13 @@ constexpr int RUDP_POOL_MIN_SIZE = 0xC58;
 constexpr std::uintptr_t RUDP_POOL_ALIGNMENT = 8;
 constexpr std::size_t RUDP_STATUS_SIZE = 0xF8;
 constexpr std::size_t RUDP_STATUS_CURRENT_CONTEXTS = 0x64;
+constexpr uint16_t RUDP_MAX_SEGMENT_SIZE = 1410;
 
 using GuestRudpEventHandler = void(APS5_VABI*)(int, int, int, void*);
 
 std::mutex g_mutex;
 bool g_inited = false;
+bool g_io_thread = false;
 int g_next_ctx = 0;
 std::map<int, bool> g_ctx;  // id -> bound
 GuestRudpEventHandler g_handler = nullptr;
@@ -37,6 +41,16 @@ void* g_handler_arg = nullptr;
 
 bool valid_ctx(int ctx) {
     return g_ctx.count(ctx) != 0;
+}
+
+int query_ctx_error(int ctx) {
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    if (ctx < 0) {
+        return RUDP_ERROR_INVALID_ARGUMENT;
+    }
+    return valid_ctx(ctx) ? 0 : RUDP_ERROR_INVALID_CONTEXT_ID;
 }
 }  // namespace
 
@@ -76,17 +90,7 @@ int APS5_VABI sceRudpGetStatus(void* status, std::size_t size) {
     return 0;
 }
 
-int APS5_VABI sceRudpEnd(void) {
-    std::lock_guard<std::mutex> lk(g_mutex);
-    if (!g_inited) {
-        return RUDP_ERROR_NOT_INITIALIZED;
-    }
-    g_inited = false;
-    g_ctx.clear();
-    return 0;
-}
-
-int APS5_VABI sceRudpTerminate(int ctx_id) {
+int APS5_VABI sceRudpEnd(int ctx_id) {
     std::lock_guard<std::mutex> lk(g_mutex);
     if (!g_inited) {
         return RUDP_ERROR_NOT_INITIALIZED;
@@ -94,11 +98,73 @@ int APS5_VABI sceRudpTerminate(int ctx_id) {
     return g_ctx.erase(ctx_id) != 0 ? 0 : RUDP_ERROR_INVALID_CONTEXT_ID;
 }
 
+int APS5_VABI sceRudpTerminate(void) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    g_inited = false;
+    g_io_thread = false;
+    g_ctx.clear();
+    return 0;
+}
+
 int APS5_VABI sceRudpEnableInternalIOThread(uint32_t stack_size, uint32_t priority) {
     (void)stack_size;
     (void)priority;
     std::lock_guard<std::mutex> lk(g_mutex);
-    return g_inited ? 0 : RUDP_ERROR_NOT_INITIALIZED;
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    g_io_thread = true;
+    return 0;
+}
+
+int APS5_VABI sceRudpGetMaxSegmentSize(uint16_t* mss) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    if (mss == nullptr) {
+        return RUDP_ERROR_INVALID_ARGUMENT;
+    }
+    *mss = RUDP_MAX_SEGMENT_SIZE;
+    return 0;
+}
+
+int APS5_VABI sceRudpProcessEvents(uint64_t timeout) {
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (!g_inited) {
+            return RUDP_ERROR_NOT_INITIALIZED;
+        }
+        if (g_io_thread) {
+            NotImplemented_nid_no_patch(__func__);
+        }
+    }
+    std::this_thread::sleep_for(std::chrono::duration<uint64_t, std::micro>(timeout));
+    return 0;
+}
+
+int APS5_VABI sceRudpNetFlush(void) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    if (g_io_thread) {
+        NotImplemented_nid_no_patch(__func__);
+    }
+    return 0;
+}
+
+int APS5_VABI sceRudpNetReceived(int soc, const uint8_t* data, std::size_t data_len, const void* from, uint32_t from_len) {
+    (void)soc;
+    (void)data;
+    (void)data_len;
+    (void)from;
+    (void)from_len;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int APS5_VABI sceRudpSetEventHandler(GuestRudpEventHandler handler, void* arg) {

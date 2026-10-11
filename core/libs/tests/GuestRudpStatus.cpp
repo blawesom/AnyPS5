@@ -1,21 +1,61 @@
 #include "SceTypes.hpp"
 
 #include <array>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 extern "C" {
 using GuestRudpEventHandler = void(APS5_VABI*)(int, int, int, void*);
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
 int APS5_VABI sceRudpGetStatus(void*, std::size_t);
 int APS5_VABI sceRudpCreateContext(GuestRudpEventHandler, void*, int*);
-int APS5_VABI sceRudpTerminate(int);
-int APS5_VABI sceRudpEnd();
+int APS5_VABI sceRudpTerminate(void);
+int APS5_VABI sceRudpEnd(int);
+int APS5_VABI sceRudpEnableInternalIOThread(std::uint32_t, std::uint32_t);
+int APS5_VABI sceRudpBind(int, std::uint16_t, int, std::uint16_t);
+int APS5_VABI sceRudpInitiate(int, const void*, std::uint32_t, std::uint16_t);
+int APS5_VABI sceRudpGetMaxSegmentSize(std::uint16_t*);
+int APS5_VABI sceRudpProcessEvents(std::uint64_t);
+int APS5_VABI sceRudpNetFlush();
+int APS5_VABI sceRudpNetReceived(int, const std::uint8_t*, std::size_t, const void*, std::uint32_t);
+int APS5_VABI sceRudpGetNumberOfPacketsToRead(int);
+int APS5_VABI sceRudpGetSizeWritable(int);
+int APS5_VABI sceRudpGetSizeReadable(int);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+template <typename TCall>
+static void RequireNotImplemented(const char* name, TCall call) {
+    bool thrown = false;
+    try {
+        call();
+    } catch (const std::runtime_error& error) {
+        thrown = std::string(error.what()) == std::string(name) + " not implemented";
+    }
+    Require(thrown);
+}
+
+static void RequireQueries(int ctx, int packets, int size) {
+    Require(sceRudpGetNumberOfPacketsToRead(ctx) == packets);
+    Require(sceRudpGetSizeWritable(ctx) == size);
+    Require(sceRudpGetSizeReadable(ctx) == size);
+}
+
+static void RequireLibrary(int result) {
+    std::uint16_t mss = 0x5a5a;
+    Require(sceRudpGetMaxSegmentSize(&mss) == result);
+    Require(mss == 0x5a5a);
+    Require(sceRudpGetMaxSegmentSize(nullptr) == result);
+    Require(sceRudpProcessEvents(0) == result);
+    Require(sceRudpProcessEvents(1000) == result);
+    Require(sceRudpNetFlush() == result);
+}
 
 static void APS5_VABI Handler(int, int, int, void*) {}
 
@@ -25,6 +65,8 @@ int main() {
     constexpr int invalidContextId = static_cast<int>(0x80770003);
     constexpr int invalidArgument = static_cast<int>(0x80770004);
     constexpr int memory = static_cast<int>(0x80770007);
+    constexpr int notAcceptable = static_cast<int>(0x80770011);
+    constexpr std::uint16_t maxSegmentSize = 1410;
     constexpr std::size_t statusSize = 0xF8;
     constexpr std::size_t currentContexts = 0x64;
     alignas(16) static unsigned char pool[0x10000];
@@ -36,8 +78,12 @@ int main() {
     Require(sceRudpGetStatus(nullptr, 0) == notInitialized);
     Require(sceRudpGetStatus(status.data(), statusSize + 1) == notInitialized);
     Require(status == untouched);
-    Require(sceRudpEnd() == notInitialized);
-    Require(sceRudpTerminate(0) == notInitialized);
+    Require(sceRudpEnd(0) == notInitialized);
+    Require(sceRudpTerminate() == notInitialized);
+    RequireLibrary(notInitialized);
+    for (int ctx : {0, 12345, -1}) RequireQueries(ctx, notInitialized, notInitialized);
+    const std::uint8_t datagram[4] = {};
+    RequireNotImplemented("sceRudpNetReceived", [&] { sceRudpNetReceived(0, datagram, sizeof(datagram), nullptr, 0); });
 
     Require(sceRudpInit_nid_postfix(nullptr, sizeof(pool)) == invalidArgument);
     Require(sceRudpInit_nid_postfix(pool, 0) == invalidArgument);
@@ -57,6 +103,18 @@ int main() {
     for (std::size_t i = 0; i < statusSize; ++i) Require(status[i] == 0);
     for (std::size_t i = statusSize; i < status.size(); ++i) Require(status[i] == 0x5a);
 
+    for (std::uint16_t initial : {std::uint16_t{0}, std::uint16_t{0x5a5a}}) {
+        std::uint16_t mss = initial;
+        Require(sceRudpGetMaxSegmentSize(&mss) == 0);
+        Require(mss == maxSegmentSize);
+    }
+    Require(sceRudpGetMaxSegmentSize(nullptr) == invalidArgument);
+    Require(sceRudpProcessEvents(0) == 0);
+    Require(sceRudpProcessEvents(1000) == 0);
+    Require(sceRudpNetFlush() == 0);
+    for (int ctx : {0, 1, 12345}) RequireQueries(ctx, invalidContextId, invalidContextId);
+    for (int ctx : {-1, INT_MIN}) RequireQueries(ctx, invalidArgument, invalidArgument);
+
     int first = -1;
     int second = -1;
     Require(sceRudpCreateContext(Handler, nullptr, &first) == 0);
@@ -75,18 +133,40 @@ int main() {
     Require(status[0] == 0);
     for (std::size_t i = 1; i < status.size(); ++i) Require(status[i] == 0x5a);
 
-    Require(sceRudpTerminate(first) == 0);
-    Require(sceRudpTerminate(first) == invalidContextId);
+    RequireQueries(first, 0, notAcceptable);
+    RequireQueries(second, 0, notAcceptable);
+    RequireQueries(12345, invalidContextId, invalidContextId);
+    RequireQueries(-1, invalidArgument, invalidArgument);
+    Require(sceRudpBind(second, 1, 0, 0) == 0);
+    Require(sceRudpInitiate(second, nullptr, 0, 1) == static_cast<int>(0x8077000A));
+    RequireQueries(second, 0, notAcceptable);
+
+    Require(sceRudpEnd(first) == 0);
+    Require(sceRudpEnd(first) == invalidContextId);
+    RequireQueries(first, invalidContextId, invalidContextId);
+    RequireQueries(second, 0, notAcceptable);
     Require(sceRudpGetStatus(status.data(), statusSize) == 0);
     std::memcpy(&contexts, status.data() + currentContexts, sizeof(contexts));
     Require(contexts == 1);
 
-    Require(sceRudpEnd() == 0);
-    Require(sceRudpEnd() == notInitialized);
-    Require(sceRudpTerminate(second) == notInitialized);
+    Require(sceRudpEnableInternalIOThread(0x4000, 0x300) == 0);
+    std::uint16_t mss = 0;
+    Require(sceRudpGetMaxSegmentSize(&mss) == 0);
+    Require(mss == maxSegmentSize);
+    RequireNotImplemented("sceRudpProcessEvents", [] { sceRudpProcessEvents(0); });
+    RequireNotImplemented("sceRudpNetFlush", [] { sceRudpNetFlush(); });
+
+    Require(sceRudpTerminate() == 0);
+    Require(sceRudpTerminate() == notInitialized);
+    RequireLibrary(notInitialized);
+    RequireQueries(second, notInitialized, notInitialized);
+    Require(sceRudpEnd(second) == notInitialized);
     Require(sceRudpGetStatus(status.data(), statusSize) == notInitialized);
     Require(sceRudpInit_nid_postfix(pool + 8, 0xC58) == 0);
-    Require(sceRudpTerminate(second) == invalidContextId);
-    Require(sceRudpEnd() == 0);
+    Require(sceRudpEnd(second) == invalidContextId);
+    RequireQueries(second, invalidContextId, invalidContextId);
+    Require(sceRudpProcessEvents(0) == 0);
+    Require(sceRudpNetFlush() == 0);
+    Require(sceRudpTerminate() == 0);
     return 0;
 }
