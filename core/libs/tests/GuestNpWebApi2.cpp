@@ -15,7 +15,15 @@ extern "C" {
 int APS5_VABI sceNpWebApi2Initialize(int, std::size_t);
 int APS5_VABI sceNpWebApi2Terminate(int);
 int APS5_VABI sceNpWebApi2GetMemoryPoolStats(int, NpWebApi2MemoryPoolStats*);
+int APS5_VABI sceNpWebApi2PushEventCreateHandle(int);
+int APS5_VABI sceNpWebApi2PushEventAbortHandle(int, int);
+int APS5_VABI sceNpWebApi2PushEventDeleteHandle(int, int);
+int APS5_VABI sceNpWebApi2PushEventCreateFilter(int, int, const char*, std::uint32_t, const void*, std::size_t);
 }
+
+static constexpr int LibContextNotFound = static_cast<int>(0x80553404);
+static constexpr int Aborted = static_cast<int>(0x80553409);
+static constexpr int HandleNotFound = static_cast<int>(0x8055340D);
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -29,7 +37,32 @@ static bool Throws(TCall call) {
     return false;
 }
 
+static void TestPushEventAbortHandle() {
+    const int context = sceNpWebApi2Initialize(1, 0x8000);
+    const int other = sceNpWebApi2Initialize(1, 0x8000);
+    const std::uint64_t filterParam[2]{};
+    const int handle = sceNpWebApi2PushEventCreateHandle(context);
+    const int kept = sceNpWebApi2PushEventCreateHandle(context);
+    Require(handle > 0 && kept > 0 && handle != kept);
+    Require(sceNpWebApi2PushEventCreateFilter(context, handle, nullptr, 0, filterParam, 1) > 0);
+    Require(sceNpWebApi2PushEventAbortHandle(context, handle) == 0);
+    Require(sceNpWebApi2PushEventCreateFilter(context, handle, nullptr, 0, filterParam, 1) == Aborted);
+    Require(sceNpWebApi2PushEventAbortHandle(context, handle) == 0);
+    Require(sceNpWebApi2PushEventCreateFilter(context, kept, nullptr, 0, filterParam, 1) > 0);
+    Require(sceNpWebApi2PushEventAbortHandle(other, handle) == HandleNotFound);
+    Require(sceNpWebApi2PushEventAbortHandle(context, 0x7FFFFFFF) == HandleNotFound);
+    Require(sceNpWebApi2PushEventAbortHandle(0x7FFFFFFF, handle) == LibContextNotFound);
+    Require(sceNpWebApi2PushEventCreateHandle(0x7FFFFFFF) == LibContextNotFound);
+    Require(sceNpWebApi2PushEventDeleteHandle(context, handle) == 0);
+    Require(sceNpWebApi2PushEventAbortHandle(context, handle) == HandleNotFound);
+    Require(sceNpWebApi2PushEventDeleteHandle(context, handle) == HandleNotFound);
+    Require(sceNpWebApi2Terminate(context) == 0);
+    Require(sceNpWebApi2PushEventAbortHandle(context, kept) == LibContextNotFound);
+    Require(sceNpWebApi2Terminate(other) == 0);
+}
+
 int main() {
+    TestPushEventAbortHandle();
     const int context = sceNpWebApi2Initialize(1, 0x20000);
     const int other = sceNpWebApi2Initialize(1, 0x8000);
     Require(context > 0 && other > 0 && context != other);
