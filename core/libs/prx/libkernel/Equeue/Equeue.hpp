@@ -18,6 +18,7 @@
 
 static constexpr int16_t EVFILT_READ = -1;
 static constexpr int16_t EVFILT_WRITE = -2;
+static constexpr int16_t EVFILT_VNODE = -4;
 static constexpr int16_t EVFILT_TIMER = -7;
 static constexpr int16_t EVFILT_USER = -11;
 static constexpr int16_t EVFILT_VIDEO_OUT = -13;
@@ -89,7 +90,6 @@ public:
 
 private:
     void TriggerExpiredTimers(uint64_t nowNs);
-    int CollectTriggered(KernelEvent* ev, int num);
     bool NextTimerWaitMicros(uint64_t nowNs, uint32_t* out) const;
     int CollectTriggered(KernelEvent* ev, int num);
     int CollectOncePerWait(KernelEvent* ev, int num);
@@ -112,6 +112,9 @@ void EqueueDescriptorClosed(int descriptor);
 void KqueueDescriptorClosed(int descriptor);
 bool IsKqueueDescriptor(int descriptor);
 KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata);
+void RequireVnodeNotes(uint32_t fflags);
+void SetVnodeNotes(KernelEqueueEvent& event, uint32_t fflags);
+int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, uint32_t fflags, uint16_t flags, void* udata);
 extern "C" {
 
 KernelEqueueRef EqueuePin_nid_postfix(KernelEqueue eq);
