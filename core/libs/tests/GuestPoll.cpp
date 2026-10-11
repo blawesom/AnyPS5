@@ -22,6 +22,9 @@ std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 int APS5_VABI close_nid_postfix(int);
 int APS5_VABI open_nid_postfix(const char*, int, int);
+int APS5_VABI pipe_nid_postfix(int*);
+std::int64_t APS5_VABI read_nid_postfix(int, void*, std::uint64_t);
+std::int64_t APS5_VABI write_nid_postfix(int, const char*, std::int64_t);
 int APS5_VABI poll_nid_postfix(PollDescriptor*, std::uint32_t, int);
 int* APS5_VABI __error_nid_postfix();
 }
@@ -66,8 +69,36 @@ static void PollsFilesNextToSockets() {
     Require(close_nid_postfix(datagram) == 0);
     Require(std::filesystem::remove(path));
 }
+static void PollsPipeEnds() {
+    int ends[2];
+    Require(pipe_nid_postfix(ends) == 0);
+    PollDescriptor reader{ends[0], In, -1};
+    Require(poll_nid_postfix(&reader, 1, 0) == 0 && reader.revents == 0);
+    const auto start = std::chrono::steady_clock::now();
+    Require(poll_nid_postfix(&reader, 1, 150) == 0 && reader.revents == 0);
+    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(150));
+    PollDescriptor writer{ends[1], In, -1};
+    Require(poll_nid_postfix(&writer, 1, 0) == 0 && writer.revents == 0);
+#ifdef _WIN32
+    writer.events = Out;
+    Require(Throws([&] { poll_nid_postfix(&writer, 1, 0); }));
+#endif
+    Require(write_nid_postfix(ends[1], "p", 1) == 1);
+    Require(poll_nid_postfix(&reader, 1, 1000) == 1 && reader.revents == In);
+    char byte = 0;
+    Require(read_nid_postfix(ends[0], &byte, 1) == 1 && byte == 'p');
+    Require(poll_nid_postfix(&reader, 1, 0) == 0 && reader.revents == 0);
+    Require(close_nid_postfix(ends[1]) == 0);
+    reader.events = In | Out;
+    Require(poll_nid_postfix(&reader, 1, -1) == 1 && (reader.revents & Hup) != 0 && (reader.revents & Out) == 0);
+#ifdef _WIN32
+    Require(reader.revents == (In | Hup));
+#endif
+    Require(close_nid_postfix(ends[0]) == 0);
+}
 int main() {
     PollsFilesNextToSockets();
+    PollsPipeEnds();
     const int listener = socket_nid_postfix(2, 1, 0);
     Require(listener >= 0);
     std::array<unsigned char, 16> address{16, 2, 0, 0, 127, 0, 0, 1};

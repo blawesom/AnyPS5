@@ -4,6 +4,7 @@
 
 #ifdef _WIN32
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#include "prx/libkernel/File/include/PipeEnd.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <io.h>
@@ -36,7 +37,9 @@ bool AlwaysReady(int descriptor, const char* caller) {
     switch (::GetFileType(reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor)))) {
         case FILE_TYPE_DISK: return true;
         case FILE_TYPE_CHAR: Unsupported(caller, descriptor, "Windows console or character device");
-        case FILE_TYPE_PIPE: Unsupported(caller, descriptor, "Windows pipe");
+        case FILE_TYPE_PIPE:
+            if (File::FindPipeEnd(descriptor)) return false;
+            Unsupported(caller, descriptor, "Windows pipe not created by pipe()");
         default: Unsupported(caller, descriptor, "Windows handle of unknown type");
     }
 #else
@@ -46,6 +49,24 @@ bool AlwaysReady(int descriptor, const char* caller) {
     return S_ISREG(status.st_mode) || S_ISDIR(status.st_mode);
 #endif
 }
+
+#ifdef _WIN32
+short WindowsPipeEvents(const KernelSocketPoll::Entry& entry, const char* caller) {
+    const auto end = File::FindPipeEnd(entry.descriptor);
+    if (!end) throw std::runtime_error(std::string(caller) + ": pipe descriptor " + std::to_string(entry.descriptor) + " was closed while polling");
+    if (*end == File::PipeEnd::Write) {
+        if (entry.events & KernelSocketPoll::Writable)
+            Unsupported(caller, entry.descriptor, "write end of a Windows pipe, whose free space the host does not report");
+        return 0;
+    }
+    DWORD available = 0;
+    if (::PeekNamedPipe(reinterpret_cast<HANDLE>(::_get_osfhandle(entry.descriptor)), nullptr, 0, nullptr, &available, nullptr))
+        return available != 0 ? static_cast<short>(entry.events & KernelSocketPoll::Readable) : 0;
+    const DWORD error = ::GetLastError();
+    if (error == ERROR_BROKEN_PIPE) return static_cast<short>((entry.events & KernelSocketPoll::Readable) | KernelSocketPoll::HangUp);
+    throw std::runtime_error(std::string(caller) + ": PeekNamedPipe failed for descriptor " + std::to_string(entry.descriptor) + ", error=" + std::to_string(error));
+}
+#endif
 
 }
 
@@ -69,7 +90,10 @@ int PollHostDescriptors(KernelSocketPoll::Entry* entries, int count, int timeout
             if (entry.revents != 0) ++ready;
             continue;
         }
-#ifndef _WIN32
+#ifdef _WIN32
+        entry.revents = WindowsPipeEvents(entry, caller);
+        if (entry.revents != 0) ++ready;
+#else
         pollfd request{};
         request.fd = entry.descriptor;
         if (entry.events & KernelSocketPoll::Readable) request.events |= POLLIN;
