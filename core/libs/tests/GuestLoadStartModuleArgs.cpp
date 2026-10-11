@@ -47,6 +47,12 @@ int main(int argc, char** argv) {
     Seen seen = Load(module, events, 0, nullptr);
     Require(seen.args == 0 && seen.argp == 0);
 
+    std::uint8_t stackBlock[24] = {};
+    seen = Load(module, events, sizeof(stackBlock), stackBlock);
+    Require(seen.args == sizeof(stackBlock) && seen.argp == Address(stackBlock));
+    seen = Load(module, events, 0, nullptr);
+    Require(seen.args == 0 && seen.argp == 0);
+
     std::vector<std::uint8_t> engine(52, 0);
     const std::size_t engineAddress = Address(engine.data());
     seen = Load(module, events, engine.size(), engine.data());
