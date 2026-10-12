@@ -23,7 +23,11 @@ struct EnvironmentEntry {
 };
 std::mutex environmentMutex;
 std::vector<EnvironmentEntry>& Environment() {
-    static std::vector<EnvironmentEntry> entries;
+    static std::vector<EnvironmentEntry> entries = [] {
+        std::vector<EnvironmentEntry> result;
+        result.push_back({std::make_unique<std::string>("ASOBI_ROOT=app0"), nullptr});
+        return result;
+    }();
     return entries;
 }
 bool ValidEnvironmentName(const char* name) {
