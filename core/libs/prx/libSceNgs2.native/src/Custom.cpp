@@ -84,7 +84,7 @@ static void SetUserFxParam(Ngs2Voice& voice, std::uint32_t index, const Ngs2Cust
 }
 
 void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
-    if (voice.rack->rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
+    if (voice.rack->rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER && voice.rack->rackId != SCE_NGS2_RACK_ID_CUSTOM_SAMPLER) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
     if (param.id == SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP) {
         SetupCustomSubmixer(voice, ParamAs<Ngs2CustomSubmixerVoiceSetupParam>(param));
         return;
