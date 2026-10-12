@@ -481,6 +481,7 @@ int File::DuplicateFrom(int fd, int start) {
     File::ShareDescriptor(fd, duplicate);
     return duplicate;
 #endif
+}
 
 static int LookupError(const std::filesystem::path& native) {
     std::error_code error;
