@@ -139,6 +139,18 @@ float APS5_VABI atanf_nid_postfix(float x) { return std::atan(x); }
 double APS5_VABI atan2_nid_postfix(double y, double x) { return std::atan2(y, x); }
 float APS5_VABI powf_nid_postfix(float base, float exp) { return std::pow(base, exp); }
 double APS5_VABI pow_nid_postfix(double base, double exp) { return std::pow(base, exp); }
+double APS5_VABI __powidf2_nid_postfix(double base, int exponent) {
+    const bool reciprocal = exponent < 0;
+    unsigned int magnitude = reciprocal ? 0u - static_cast<unsigned int>(exponent) : static_cast<unsigned int>(exponent);
+    double result = 1.0;
+    while (magnitude != 0u) {
+        if ((magnitude & 1u) != 0u) result *= base;
+        magnitude >>= 1u;
+        if (magnitude == 0u) break;
+        base *= base;
+    }
+    return reciprocal ? 1.0 / result : result;
+}
 float APS5_VABI __powisf2_nid_postfix(float base, int exponent) {
     const bool reciprocal = exponent < 0;
     float result = 1.0f;
