@@ -1557,6 +1557,30 @@ void verifyMeshConfiguration() {
         RecompileCacheKey::Build(primitiveGrouped, key);
         require((key != patchKey) == (stage != ShaderStage::Local), "only the hull and domain cache keys may depend on the primitive group size, which rebuilds their relative patch index");
     }
+    auto instanced = hull;
+    instanced.graphics->draw.instanceCount = 2u;
+    instanced.graphics->draw.indexCount = 12u;
+    auto longer = instanced;
+    longer.graphics->draw.indexCount = 16u;
+    auto breaking = instanced;
+    breaking.graphics->tessellation->breakAtInstance = true;
+    for (const auto stage : {ShaderStage::Local, ShaderStage::TessellationControl, ShaderStage::TessellationEvaluation}) {
+        hull.shader.stage = stage;
+        instanced.shader.stage = stage;
+        longer.shader.stage = stage;
+        breaking.shader.stage = stage;
+        RecompileCacheKey::Build(hull, key);
+        const auto single = key;
+        RecompileCacheKey::Build(instanced, key);
+        const auto shared = key;
+        RecompileCacheKey::Build(longer, key);
+        require((shared != single && key != shared) == (stage != ShaderStage::Local), "only the hull and domain cache keys may depend on the patches per instance of an instanced draw");
+        RecompileCacheKey::Build(breaking, key);
+        require(key == single, "an instanced draw whose instances start hull threadgroups (BREAK_WAVE_AT_EOI) changed the cache key");
+    }
+    breaking.shader.stage = ShaderStage::TessellationControl;
+    const auto breakingReplay = RequestSerializer{}.Deserialize(RequestSerializer{}.Serialize(breaking));
+    require(breakingReplay.request.graphics && breakingReplay.request.graphics->tessellation && breakingReplay.request.graphics->tessellation->breakAtInstance, "BREAK_WAVE_AT_EOI was lost in serialization");
     const std::array<std::uint32_t, 8> users{};
     request.context.waveSize = 32u;
     request.context.userData = users;
@@ -1696,12 +1720,12 @@ void verifyPixelRequestSerialization() {
     minimal.context.waveSize = 64;
     minimal.context.pixel = ShaderPixelStageInfo{};
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQRMAAAA=", "new requests did not use serialization version 19");
+    require(requestPrefix(encoded, 8u) == "NVNQQRQAAAA=", "new requests did not use serialization version 20");
     constexpr std::size_t mappingOffset = 8u + 37u + 18u + 163u;
     for (std::size_t bytes = 0; bytes < 19u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage or stencil reference export flag was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQRQAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQRUAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
 }

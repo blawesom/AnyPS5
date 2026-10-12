@@ -132,7 +132,7 @@ struct Module {
         }
         const auto signature = Signature(type);
         if (vertex && storage == spv::StorageClassInput) {
-            Require((value == spv::BuiltInVertexIndex || value == spv::BuiltInInstanceIndex) && signature == "i32", "unsupported vertex built-in input");
+            Require((value == spv::BuiltInVertexIndex || value == spv::BuiltInInstanceIndex || value == spv::BuiltInBaseInstance) && signature == "i32", "unsupported vertex built-in input");
         } else if (vertex && storage == spv::StorageClassOutput) {
             Require(value == spv::BuiltInPosition && signature == "f32x4" && !position, "unsupported or duplicate vertex built-in output");
             position = true;
@@ -243,6 +243,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityImageGatherExtended ||
                     capability == spv::CapabilityImageQuery ||
                     ((vertex || evaluation) && shaderClipDistance && capability == spv::CapabilityClipDistance) ||
+                    (vertex && capability == spv::CapabilityDrawParameters) ||
                     (fragment && geometryShader && capability == spv::CapabilityGeometry) ||
                     (fragment && sampleRateShading && capability == spv::CapabilitySampleRateShading) ||
                     capability == spv::CapabilityImageMSArray ||

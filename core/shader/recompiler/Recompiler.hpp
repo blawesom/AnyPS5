@@ -280,6 +280,9 @@ struct TessellationConfiguration {
     float maxLevel = 64.0f;
     std::uint32_t patchesPerGroup = 256;
     std::uint32_t primitiveGroupSize = 0;
+    bool breakAtInstance = false;
+    std::uint32_t instancePatches = 0;
+    bool drawParameters = false;
 };
 
 inline constexpr std::uint32_t MeshDrawPushOffsetBytes = 104;
@@ -317,6 +320,11 @@ struct RecompileRequest {
     std::optional<GraphicsCompileContext> graphics;
     bool useCache = true;
 };
+
+inline std::uint32_t TessellationInstancePatches(const RecompileRequest& request) {
+    if (!request.graphics || !request.graphics->tessellation || request.graphics->draw.instanceCount <= 1u || request.graphics->tessellation->breakAtInstance) return 0u;
+    return request.graphics->draw.indexCount / request.graphics->tessellation->inputControlPoints;
+}
 
 enum class DescriptorKind {
     UniformBuffer,

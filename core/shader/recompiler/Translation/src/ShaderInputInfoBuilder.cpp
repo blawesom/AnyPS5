@@ -193,6 +193,8 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
             target.maxLevel = tessellation->maxLevel;
             target.patchesPerGroup = tessellation->patchesPerGroup;
             target.primitiveGroupSize = tessellation->primitiveGroupSize;
+            target.instancePatches = tessellation->instancePatches;
+            target.drawParameters = tessellation->drawParameters;
         }
         if (stage == ShaderStageKind::Mesh) {
             if (mesh == nullptr) throw std::runtime_error("ShaderInputInfoBuilder: a mesh-stage program has no mesh configuration");
