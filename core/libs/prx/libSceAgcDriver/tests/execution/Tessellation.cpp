@@ -50,6 +50,23 @@ alignas(256) constexpr std::array<std::uint32_t, 51> HullRestoredExecSaved{
     0xe0741000, 0x0202070b, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 29> LocalCodeStride24{
+    0xd5480004, 0x02090502, 0xd5480005, 0x02090102, 0xd5480006, 0x02110902, 0xd5480007, 0x02111102,
+    0x7e080d04, 0x7e0a0d05, 0x7e0c0d06, 0x7e0e0d07, 0x10100cff, 0x3f19999a, 0x061010ff, 0xbf666666,
+    0x3e1008ff, 0x3e800000, 0xd54b0009, 0x03c5e105, 0x16140698, 0xd9340000, 0x0000080a, 0xd8340008,
+    0x0000070a, 0xd8340010, 0x0000070a, 0xbf8cc07f, 0xbefd2106,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 51> HullNextInput{
+    0xd7650000, 0x000100c1, 0xd7660000, 0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014,
+    0x02151101, 0x362402ff, 0x000000ff, 0x16002898, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0018,
+    0x02000015, 0x162c2890, 0xd5430016, 0x045a24ff, 0x00000030, 0xbf8cc07f, 0xe0781000, 0x02020216,
+    0x7da82881, 0xbe94047e, 0xb06a0060, 0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013, 0xd8dc1008,
+    0x07000013, 0xbf8cc07f, 0x7e300306, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484, 0xbefe0414,
+    0xbe94047e, 0xbefe0414, 0xe0781000, 0x0403180a, 0x4a162481, 0x16161690, 0x4c1616ff, 0x00008000,
+    0xe0741000, 0x0202070b, 0xbf810000,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 30> DomainCode{
     0xf8000941, 0x00000000, 0x34020e84, 0x16020283, 0xe0341000, 0x04030a01, 0xe0341010, 0x04030c01,
     0xe0341020, 0x04030e01, 0xbf8c3f70, 0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02,
@@ -132,6 +149,7 @@ alignas(256) constexpr std::array<std::uint32_t, 7> PixelCode{
 };
 
 constexpr ShaderRecompiler::TessellationConfiguration Patches{3u, 3u, 1u, 2u, 2u};
+constexpr ShaderRecompiler::TessellationConfiguration NextInputPatches{4u, 3u, 1u, 2u, 2u};
 constexpr std::array<std::uint32_t, 3> PatchLevels{1u, 0u, 5u};
 
 constexpr std::uint16_t Corner(std::uint32_t patch, std::uint32_t x, std::uint32_t y) {
@@ -144,6 +162,20 @@ alignas(256) constexpr std::array<std::uint16_t, 9> Indices{
     Corner(2, 0, 0), Corner(2, 2, 0), Corner(2, 1, 2),
 };
 
+alignas(256) constexpr std::array<std::uint16_t, 12> NextInputIndices{
+    Corner(0, 0, 0), Corner(0, 0, 0), Corner(0, 2, 0), Corner(0, 1, 2),
+    Corner(1, 0, 0), Corner(1, 0, 0), Corner(1, 2, 0), Corner(1, 1, 2),
+    Corner(2, 0, 0), Corner(2, 0, 0), Corner(2, 2, 0), Corner(2, 1, 2),
+};
+
+struct Topology {
+    const ShaderRecompiler::TessellationConfiguration& patches;
+    std::span<const std::uint16_t> indices;
+};
+
+const Topology Triangles{Patches, Indices};
+const Topology NextInputTriangles{NextInputPatches, NextInputIndices};
+
 struct Stages {
     ShaderRecompiler::RecompileResult local;
     ShaderRecompiler::RecompileResult hull;
@@ -151,7 +183,7 @@ struct Stages {
     ShaderRecompiler::RecompileResult fragment;
 };
 
-ShaderRecompiler::RecompileResult Compile(const ShaderRecompiler::SpirvTarget& target, ShaderStage stage, std::span<const std::uint32_t> code, std::uint32_t& pushCursor) {
+ShaderRecompiler::RecompileResult Compile(const ShaderRecompiler::SpirvTarget& target, ShaderStage stage, std::span<const std::uint32_t> code, std::uint32_t& pushCursor, const Topology& topology = Triangles) {
     static const std::array<std::uint32_t, 16> hullUserData{0x1000u};
     static const std::array<std::uint32_t, 8> domainUserData{};
     const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
@@ -169,7 +201,7 @@ ShaderRecompiler::RecompileResult Compile(const ShaderRecompiler::SpirvTarget& t
         pixel = info;
     } else {
         vertex = ShaderRecompiler::ShaderVertexStageInfo{};
-        graphics = ShaderRecompiler::GraphicsCompileContext{hull ? 0u : 8u, {}, std::nullopt, Patches, {reinterpret_cast<std::uintptr_t>(Indices.data()), static_cast<std::uint32_t>(Indices.size()), 2, 1}};
+        graphics = ShaderRecompiler::GraphicsCompileContext{hull ? 0u : 8u, {}, std::nullopt, topology.patches, {reinterpret_cast<std::uintptr_t>(topology.indices.data()), static_cast<std::uint32_t>(topology.indices.size()), 2, 1}};
     }
     const ShaderRecompiler::RecompileRequest request{
         {stage, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
@@ -213,7 +245,7 @@ std::uint32_t Row(float y) {
     return static_cast<std::uint32_t>((1.0f - y) * 0.5f * Height);
 }
 
-void Draw(AgcDriver::VulkanDevice& device, const Stages& stages, VkCullModeFlags cull, VkFrontFace front) {
+void Draw(AgcDriver::VulkanDevice& device, const Stages& stages, VkCullModeFlags cull, VkFrontFace front, const Topology& topology) {
     for (std::size_t i = 0; i < Pixels.size(); i += 4) {
         for (std::size_t c = 0; c < 4; ++c) Pixels[i + c] = std::byte{Background[c]};
     }
@@ -230,7 +262,7 @@ void Draw(AgcDriver::VulkanDevice& device, const Stages& stages, VkCullModeFlags
         {ShaderStage::Fragment, &stages.fragment, PixelPushOffset(cursor, device.Target())},
     }};
     AgcDriver::Graphics::State state{};
-    state.stages = {AgcDriver::Graphics::ShaderPath::Tessellation, 0x0200210du, 64, 64, std::nullopt, Patches};
+    state.stages = {AgcDriver::Graphics::ShaderPath::Tessellation, 0x0200210du, 64, 64, std::nullopt, topology.patches};
     state.color = {reinterpret_cast<std::uintptr_t>(Pixels.data()), {Width, Height}, VK_FORMAT_R8G8B8A8_UNORM, Pixels.size(), 0xe4u};
     state.colors = {state.color};
     state.hasColorTarget = true;
@@ -244,7 +276,7 @@ void Draw(AgcDriver::VulkanDevice& device, const Stages& stages, VkCullModeFlags
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
     state.blendConstants = {};
-    device.Draw(state, {reinterpret_cast<std::uintptr_t>(Indices.data()), static_cast<std::uint32_t>(Indices.size()), 2, 1, 0, true}, shaders);
+    device.Draw(state, {reinterpret_cast<std::uintptr_t>(topology.indices.data()), static_cast<std::uint32_t>(topology.indices.size()), 2, 1, 0, true}, shaders);
     device.WaitIdle();
 }
 
@@ -261,24 +293,24 @@ std::uint32_t CoveredPixels(std::uint32_t patch, bool interior) {
     return count;
 }
 
-void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program) {
+void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program, std::span<const std::uint32_t> local = LocalCode, const Topology& topology = Triangles) {
     std::uint32_t cursor = 0;
     const Stages stages{
-        Compile(target, ShaderStage::Local, LocalCode, cursor),
-        Compile(target, ShaderStage::TessellationControl, hull, cursor),
-        Compile(target, ShaderStage::TessellationEvaluation, DomainCode, cursor),
-        Compile(target, ShaderStage::Fragment, PixelCode, cursor),
+        Compile(target, ShaderStage::Local, local, cursor, topology),
+        Compile(target, ShaderStage::TessellationControl, hull, cursor, topology),
+        Compile(target, ShaderStage::TessellationEvaluation, DomainCode, cursor, topology),
+        Compile(target, ShaderStage::Fragment, PixelCode, cursor, topology),
     };
     const auto center = Row(-0.5f + 1.0f / 3.0f);
     for (const auto cull : {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT}) {
-        Draw(device, stages, cull, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        Draw(device, stages, cull, VK_FRONT_FACE_COUNTER_CLOCKWISE, topology);
         const std::string name = program + (cull == VK_CULL_MODE_NONE ? ", unculled" : ", back-face culled");
         Require(CoveredPixels(0, false) > 100 && CoveredPixels(0, true) == 0, name + ": the level-1 patch was not drawn as one flat triangle, centre " + PixelText(PixelAt(Column(0, 0.25f), center)));
         Require(CoveredPixels(1, false) == 0, name + ": the patch with level 0 was not culled");
         Require(CoveredPixels(2, false) > 100 && PixelAt(Column(2, 0.25f), center)[1] > 32, name + ": the level-5 patch has no interior domain points at its centre, " + PixelText(PixelAt(Column(2, 0.25f), center)));
         Require(PixelAt(0, 0) == Background && PixelAt(Width - 1, Height - 1) == Background, name + ": the corners changed");
     }
-    Draw(device, stages, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
+    Draw(device, stages, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, topology);
     Require(CoveredPixels(0, false) == 0 && CoveredPixels(2, false) == 0, program + ": tessellated triangles did not keep the control points' winding");
 }
 
@@ -351,6 +383,7 @@ int main() {
         RequirePatches(*device, target, HullCode, "hull program");
         RequirePatches(*device, target, HullRestoredExecSaved, "hull program saving its restored exec");
         RequirePatches(*device, target, HullDynamicIndex, "hull program reading a control point at a computed index");
+        RequirePatches(*device, target, HullNextInput, "hull program reading the next of 4 input control points of 24 bytes", LocalCodeStride24, NextInputTriangles);
         device.reset();
         RequireRegisteredStages();
         std::puts("Tessellation tests passed");
