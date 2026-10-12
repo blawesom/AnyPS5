@@ -524,6 +524,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         Require(!depthCompare, "FMASK comparison sampling is not implemented");
         const auto snapshotResource = FmaskSnapshotResource_nid_no_patch(resource);
         const auto geometry = DescribeSurface(resource);
+        RequireNoMultisampleTarget(resource.baseAddress, guestBytes != 0 ? static_cast<std::size_t>(guestBytes) : static_cast<std::size_t>(geometry.guestBytes), "a texture read");
         const CmaskLayout metadata(resource.width, resource.height);
         const auto metadataBytes = resource.dccAddress != 0u ? FmaskCmaskBytes_nid_no_patch(metadata, geometry.layers) : 0u;
         if (auto* recorder = Recorder::Active()) {
