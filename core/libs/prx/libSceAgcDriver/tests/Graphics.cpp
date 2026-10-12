@@ -3657,6 +3657,41 @@ void conservativeZExportTests() {
     expectFailure([&] { AgcDriver::Graphics::ValidateShaders(shaders, state, subgroup, false); }, "unsupported fragment execution mode");
 }
 
+bool declaresEarlyFragmentTests(const ShaderRecompiler::RecompileRequest& request) {
+    const auto result = ShaderRecompiler::Recompile(request);
+    const auto& words = result.spirv.Words();
+    for (std::size_t at = 5; at < words.size() && (words[at] >> 16u) != 0; at += words[at] >> 16u) {
+        if (static_cast<spv::Op>(words[at] & 0xffffu) == spv::OpExecutionMode && words[at + 2] == spv::ExecutionModeEarlyFragmentTests) return true;
+    }
+    return false;
+}
+
+void earlyFragmentTestsTests() {
+    const std::array<std::pair<std::uint32_t, bool>, 9> cases{{
+        {0x0000u, false},
+        {0x0020u, false},
+        {0x0010u, true},
+        {0x0030u, true},
+        {0x0050u, false},
+        {0x0011u, false},
+        {0x1000u, true},
+        {0x1050u, true},
+        {0x1031u, true}
+    }};
+    const ShaderRecompiler::RequestSerializer serializer;
+    for (const auto& [shaderControl, expected] : cases) {
+        const auto request = depthExportRequest(shaderControl);
+        const auto replayed = serializer.Deserialize(serializer.Serialize(request));
+        Require(declaresEarlyFragmentTests(request) == expected && declaresEarlyFragmentTests(replayed.request) == expected, "DB_SHADER_CONTROL " + std::to_string(shaderControl) + (expected ? " did not declare" : " declared") + " early fragment tests");
+    }
+    for (const auto shaderControl : {0x0010u, 0x1000u}) {
+        auto request = depthExportRequest(shaderControl);
+        request.context.pixel->alphaToCoverage = true;
+        const auto replayed = serializer.Deserialize(serializer.Serialize(request));
+        Require(!declaresEarlyFragmentTests(request) && !declaresEarlyFragmentTests(replayed.request), "DB_SHADER_CONTROL " + std::to_string(shaderControl) + " with alpha-to-coverage declared early fragment tests");
+    }
+}
+
 constexpr std::array<std::uint32_t, 5> OrderedPixelCode{0x7e0e02f2u, 0xbf900007u, 0xf800180fu, 0x07070707u, 0xbf810000u};
 constexpr std::array<std::uint32_t, 12> OrderedBdaPixelCode{0x7e040f00u, 0x7e060280u, 0xdc208001u, 0x047d0002u, 0xdc308008u, 0x057d0002u, 0xbf8c3f70u, 0x4a080b04u, 0x7e0e0d04u, 0xf800180fu, 0x07070707u, 0xbf810000u};
 
@@ -4953,6 +4988,7 @@ int main(int argc, char** argv) {
         unorm10_11_11TargetTests();
         DepthBoundsBiasTests();
         conservativeZExportTests();
+        earlyFragmentTestsTests();
         orderedPixelShaderTests();
         stencilRefExportTests();
         ProvokingVertexTests();
