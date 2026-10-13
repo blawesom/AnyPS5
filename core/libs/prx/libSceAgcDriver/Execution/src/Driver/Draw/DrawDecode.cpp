@@ -51,6 +51,7 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
             Graphics::NoteRegisterRead(Graphics::RegisterBank::Shader, userDataBase + i);
             result.userData.push_back((staticAbi ? ReadGraphicsRegister(queue.shader, userDataBase + i) : readUserData(queue.shader, userDataBase + i)));
         }
+        if (stage == Stage::Vertex && snapshot.header.empty() && snapshot.userDataTailRegister) result.tailContinuation = ReadUserDataTailContinuation(result.binary.code, result.firstUserSgpr, result.userData);
         return result;
     };
     {
