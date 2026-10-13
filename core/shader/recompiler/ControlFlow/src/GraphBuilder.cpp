@@ -1016,19 +1016,28 @@ std::optional<UserDataTail> FindUserDataTail(const RdnaProgram& program, std::ui
     const auto& tail = program.instructions[program.instructions.size() - 2u];
     if (tail.op != RdnaOpcode::SSetpcB64 || tail.source0.kind != RdnaOperandKind::ScalarRegister) return std::nullopt;
     const auto reg = tail.source0.reg;
-    if (reg % 2u != 0u || reg < userDataBase || userDataCount < 2u || reg - userDataBase >= userDataCount - 1u) return std::nullopt;
+    if (reg % 2u != 0u || reg < userDataBase || reg - userDataBase >= userDataCount) return std::nullopt;
+    bool highUnchanged = true;
+    std::optional<std::uint32_t> constantHigh;
     for (const auto& instruction : program.instructions) {
         if (instruction.programCounter >= tail.programCounter) break;
         if (IsDirectBranchOpcode(instruction.op) || instruction.op == RdnaOpcode::SCallB64 || instruction.op == RdnaOpcode::SSwappcB64 ||
             instruction.op == RdnaOpcode::SSetpcB64 || instruction.op == RdnaOpcode::SEndpgm || instruction.op == RdnaOpcode::SCodeEnd ||
-            writesScalar(instruction, reg) || writesScalar(instruction, reg + 1u)) return std::nullopt;
+            writesScalar(instruction, reg)) return std::nullopt;
+        if (writesScalar(instruction, reg + 1u)) {
+            highUnchanged = false;
+            std::uint32_t value;
+            if (instruction.op == RdnaOpcode::SMovB32 && isScalar(instruction.destination, reg + 1u) && isImmediate(instruction.source0, value)) constantHigh = value;
+            else constantHigh.reset();
+        }
     }
-    return UserDataTail{tail.programCounter, reg};
+    if (!constantHigh && (!highUnchanged || reg - userDataBase + 1u >= userDataCount)) return std::nullopt;
+    return UserDataTail{tail.programCounter, reg, constantHigh};
 }
 
 std::vector<std::uint32_t> LinkUserDataTail(const RdnaProgram& program, const UserDataTail& tail, const RdnaProgram& continuation) {
     const auto recognized = FindUserDataTail(program, tail.userDataRegister, 2u);
-    if (!recognized || recognized->programCounter != tail.programCounter) throw std::invalid_argument("user-data tail is not a linear jump through an unchanged register pair");
+    if (!recognized || recognized->programCounter != tail.programCounter || recognized->constantHigh != tail.constantHigh) throw std::invalid_argument("user-data tail is not a linear jump through a proven user-data address");
     for (const auto& instruction : continuation.instructions) {
         if (instruction.op == RdnaOpcode::SGetpcB64) throw std::invalid_argument("user-data tail continuation reads its program counter, which a linked copy does not keep");
     }

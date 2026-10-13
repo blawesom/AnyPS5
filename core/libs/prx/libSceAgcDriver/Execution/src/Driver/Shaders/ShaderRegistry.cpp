@@ -126,7 +126,8 @@ std::shared_ptr<const ShaderSnapshot> ReadUserDataTailContinuation(std::span<con
     const auto tail = ShaderRecompiler::FindUserDataTail(program, userDataBase, static_cast<std::uint32_t>(userData.size()));
     if (!tail) return nullptr;
     const auto slot = tail->userDataRegister - userDataBase;
-    const auto address = userData[slot] | (static_cast<std::uint64_t>(userData[slot + 1u]) << 32u);
+    const auto high = tail->constantHigh ? *tail->constantHigh : userData[slot + 1u];
+    const auto address = userData[slot] | (static_cast<std::uint64_t>(high) << 32u);
     require(address != 0 && (address & 3u) == 0u, "user-data tail continuation address is null or not dword aligned");
     return ReadRawShader(address);
 }
@@ -485,8 +486,9 @@ ShaderRecompiler::RectListShaders DrawRectangle(const ShaderSnapshot& front, con
 
 namespace {
 
-std::vector<std::uint32_t> LinkVertexUserDataTail(const ShaderRecompiler::RecompileRequest& request, const ShaderSnapshot& snapshot) {
-    if (request.shader.stage != ShaderRecompiler::ShaderStage::Vertex || !request.shader.header.empty() || !snapshot.userDataTailRegister) return {};
+std::vector<std::uint32_t> LinkGraphicsUserDataTail(const ShaderRecompiler::RecompileRequest& request, const ShaderSnapshot& snapshot) {
+    using Stage = ShaderRecompiler::ShaderStage;
+    if ((request.shader.stage != Stage::Vertex && request.shader.stage != Stage::Fragment) || !request.shader.header.empty() || !snapshot.userDataTailRegister) return {};
     const auto program = ShaderRecompiler::RdnaInstructionDecoder{}.Decode(request.shader.code);
     const auto tail = ShaderRecompiler::FindUserDataTail(program, request.context.userDataBaseRegister, static_cast<std::uint32_t>(request.context.userData.size()));
     if (!tail) return {};
@@ -549,7 +551,7 @@ ShaderRecompiler::PreparedShaderInvocation InvocationFor(const ShaderSnapshot& s
     const auto code = std::span(snapshot.code).subspan(codeOffset);
     require(request.shader.code.data() == code.data() && request.shader.code.size() == code.size(), "prepared invocation does not refer to registered code");
     auto linked = LinkUserDataCallees(request);
-    if (linked.empty()) linked = LinkVertexUserDataTail(request, snapshot);
+    if (linked.empty()) linked = LinkGraphicsUserDataTail(request, snapshot);
     auto source = request;
     if (!linked.empty()) source.shader.code = linked;
     auto invocationRequest = source;

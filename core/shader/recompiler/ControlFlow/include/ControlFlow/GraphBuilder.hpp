@@ -13,6 +13,7 @@ namespace ShaderRecompiler {
 struct UserDataTail {
     std::uint32_t programCounter;
     std::uint32_t userDataRegister;
+    std::optional<std::uint32_t> constantHigh;
 };
 
 [[nodiscard]] std::optional<UserDataTail> FindUserDataTail(const RdnaProgram& program, std::uint32_t userDataBase, std::uint32_t userDataCount);
