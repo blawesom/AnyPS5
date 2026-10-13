@@ -12,6 +12,7 @@
 #include "Optimization/ResourceProgram.hpp"
 #include <algorithm>
 #include <atomic>
+#include <set>
 #include <condition_variable>
 #include <cstdio>
 #include <cstddef>
@@ -808,8 +809,10 @@ public:
         {
             std::unique_lock lock(mutex);
             if (threads != 0 && !closed) {
-                if (prepared != nullptr && prepared->demanded.load()) tasks.push_front({std::move(task), prepared});
-                else tasks.push_back({std::move(task), prepared});
+                const auto sequence = ++submitted;
+                if (prepared != nullptr && prepared->demanded.load()) tasks.push_front({sequence, std::move(task), prepared});
+                else tasks.push_back({sequence, std::move(task), prepared});
+                unfinished.insert(sequence);
                 lock.unlock();
                 ready.notify_one();
                 return;
@@ -824,6 +827,12 @@ public:
         if (found == tasks.end()) return;
         if (std::getenv("APS5_TRACE_PREPARATION_WAIT") != nullptr) std::fprintf(stderr, "[shader-prepare] demanded queued task at position %zu of %zu\n", static_cast<std::size_t>(std::distance(tasks.begin(), found)), tasks.size());
         std::rotate(tasks.begin(), found, std::next(found));
+    }
+
+    void AwaitSubmitted() {
+        std::unique_lock lock(mutex);
+        const auto ticket = submitted;
+        idle.wait(lock, [&] { return unfinished.empty() || *unfinished.begin() > ticket; });
     }
 
     void Close() {
@@ -851,20 +860,21 @@ private:
         auto& pool = *static_cast<RegistrationPreparePool*>(argument);
         if (PerformanceTrace::Configured()) PerformanceTrace::BindThread("shader prepare", TraceThread::DefaultCapacity / 8);
         for (;;) {
-            Task task;
+            Job job;
             {
                 std::unique_lock lock(pool.mutex);
                 pool.ready.wait(lock, [&] { return !pool.tasks.empty(); });
-                task = std::move(pool.tasks.front());
+                job = std::move(pool.tasks.front());
                 pool.tasks.pop_front();
                 ++pool.running;
             }
-            task.function();
-            task = {};
+            job.function();
+            job.function = nullptr;
             {
                 std::lock_guard lock(pool.mutex);
                 --pool.running;
-                if (pool.tasks.empty() && pool.running == 0) pool.idle.notify_all();
+                pool.unfinished.erase(job.sequence);
+                pool.idle.notify_all();
             }
         }
         return nullptr;
@@ -878,9 +888,17 @@ private:
     std::mutex mutex;
     std::condition_variable ready;
     std::condition_variable idle;
-    std::deque<Task> tasks;
+    struct Job {
+        std::uint64_t sequence = 0;
+        std::function<void()> function;
+        const PreparedShaders* prepared = nullptr;
+    };
+
+    std::deque<Job> tasks;
     unsigned threads = 0;
     unsigned running = 0;
+    std::uint64_t submitted = 0;
+    std::set<std::uint64_t> unfinished;
     bool closed = false;
 };
 
@@ -924,6 +942,10 @@ void SubmitRegistrationPreparation(std::function<void()> task, const PreparedSha
 void PrioritizeRegistrationPreparation(PreparedShaders& prepared) {
     prepared.demanded.store(true);
     if (auto* pool = RegistrationPreparePool::Existing()) pool->Prioritize(prepared);
+}
+
+void AwaitRegistrationPreparation() {
+    RegistrationPreparePool::Instance().AwaitSubmitted();
 }
 
 void SubmitLibraryPrebuild(std::function<void()> task) {
