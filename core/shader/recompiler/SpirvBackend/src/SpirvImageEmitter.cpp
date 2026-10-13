@@ -1644,7 +1644,7 @@ void EmitImage(SpirvValueEmitContext& ctx, const IrValue& inst) {
             if (inst.Opcode() != IrOpcode::ImageRead || memory.dataBits != 32u) ctx.Fail(inst, "FMASK requires a 32-bit image read");
             auto unpacked = mode;
             unpacked.packedFormat = IrBufferFormat::Invalid;
-            EmitImageMode(ctx, inst, unpacked);
+            EmitImageMode(ctx, inst, unpacked, table);
         } else if (mode.depthBits && memory.dataBits == 16u) {
             ctx.Fail(inst, "depth bits require a 32-bit image result");
         } else {
