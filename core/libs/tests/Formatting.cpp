@@ -193,16 +193,6 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
         address(0x1a), 6, address(0xf), -6, address(0xf)) == 34 &&
         std::strcmp(pointers, "[0x1a][0x1a][0x1a][   0xf][0xf   ]") == 0);
     Require(snprintf_nid_postfix(pointers, 6, "%p", address(0xabcdef)) == 8 && std::strcmp(pointers, "0xabc") == 0);
-    char oversized[8] = {'x', 'x'};
-    errno = 0;
-    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX) + 2, "ab") == -1 && errno == 84 && oversized[0] == 0 && oversized[1] == 'x');
-    oversized[0] = 'x';
-    errno = 0;
-    Require(FormatList(oversized, static_cast<size_t>(-1), "ab") == -1 && errno == 84 && oversized[0] == 0);
-    Require(snprintf_nid_postfix(nullptr, static_cast<size_t>(INT_MAX) + 2, "ab") == -1);
-    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX), "ab") == 2 && std::strcmp(oversized, "ab") == 0);
-    oversized[0] = 0;
-    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX) + 1, "ab") == 2 && std::strcmp(oversized, "ab") == 0);
 #endif
     snprintf_nid_postfix(buffer, sizeof(buffer), "%.*s", -1, "unlimited");
     Require(std::strcmp(buffer, "unlimited") == 0);
@@ -303,4 +293,26 @@ static void CheckAllocatingFormat() {
     free_nid_postfix(allocated);
 }
 
-int main() { RunChecks(); CheckAllocatingFormat(); return CheckWidePrecision() ? 0 : 1; }
+#ifdef _WIN32
+static void CheckWindowsSizeLimits() {
+    char oversized[8] = {'x', 'x'};
+    errno = 0;
+    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX) + 2, "ab") == -1 && errno == 84 && oversized[0] == 0 && oversized[1] == 'x');
+    oversized[0] = 'x';
+    errno = 0;
+    Require(FormatList(oversized, static_cast<size_t>(-1), "ab") == -1 && errno == 84 && oversized[0] == 0);
+    Require(snprintf_nid_postfix(nullptr, static_cast<size_t>(INT_MAX) + 2, "ab") == -1);
+    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX), "ab") == 2 && std::strcmp(oversized, "ab") == 0);
+    oversized[0] = 0;
+    Require(snprintf_nid_postfix(oversized, static_cast<size_t>(INT_MAX) + 1, "ab") == 2 && std::strcmp(oversized, "ab") == 0);
+}
+#endif
+
+int main() {
+    RunChecks();
+    CheckAllocatingFormat();
+#ifdef _WIN32
+    CheckWindowsSizeLimits();
+#endif
+    return CheckWidePrecision() ? 0 : 1;
+}
