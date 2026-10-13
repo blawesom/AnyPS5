@@ -225,7 +225,6 @@ static void RequireSettimeError(int clockId, const KernelTimespec* time, int err
     *__error_nid_postfix() = 0;
     Require(clock_settime_nid_postfix(clockId, time) == -1 && *__error_nid_postfix() == error);
 }
-
 static bool SettimeThrows(const KernelTimespec& time, const char* requested) {
     try {
         clock_settime_nid_postfix(GUEST_CLOCK_REALTIME, &time);
@@ -252,7 +251,9 @@ static void SettimeValidatesLikeFreebsd() {
     Require(SettimeThrows(valid, "1767225600.000000005"));
     Require(SettimeThrows(KernelTimespec{0, 0}, "0.000000000"));
     Require(SettimeThrows(KernelTimespec{1, NANOS_PER_SECOND - 1}, "1.999999999"));
-static void RequireZone(const char* zone, std::int64_t utc, std::int64_t east, std::int32_t daylight) {
+}
+
+static void RequireZone(const char* zone, std::int64_t utc, std::int64_t east, std::int32_t daylight, std::int32_t zoneDaylight) {
     SetTimeZone(zone);
     std::int64_t local = -1;
     KernelTimesec universal{-1, 0xa5a5a5a5u, 0xa5a5a5a5u};
@@ -264,18 +265,18 @@ static void RequireZone(const char* zone, std::int64_t utc, std::int64_t east, s
     KernelTimesec state{-1, 0xa5a5a5a5u, 0xa5a5a5a5u};
     std::int32_t dst = -1;
     Require(sceKernelConvertLocaltimeToUtc(local, 0, &converted, &state, &dst) == SCE_OK);
-    Require(converted == utc && dst == daylight);
+    Require(converted == utc && dst == zoneDaylight);
     Require(state.t == local && state.west_sec == universal.west_sec && state.dst_sec == universal.dst_sec);
 }
 
 static void CalendarConversionsFollowTheHostZone() {
     constexpr std::int64_t winter = 1768478400;
     constexpr std::int64_t summer = 1782907200;
-    RequireZone("UTC0", summer, 0, 0);
-    RequireZone("IST-5:30", winter, 19800, 0);
-    RequireZone("BRT+3", summer, -10800, 0);
-    RequireZone("EST5EDT", winter, -18000, 0);
-    RequireZone("EST5EDT", summer, -14400, 3600);
+    RequireZone("UTC0", summer, 0, 0, 0);
+    RequireZone("IST-5:30", winter, 19800, 0, 0);
+    RequireZone("BRT+3", summer, -10800, 0, 0);
+    RequireZone("EST5EDT", winter, -18000, 0, 3600);
+    RequireZone("EST5EDT", summer, -14400, 3600, 3600);
     SetTimeZone("UTC0");
 }
 
