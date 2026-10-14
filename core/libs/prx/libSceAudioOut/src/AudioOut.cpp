@@ -12,6 +12,12 @@
 
 #include "SDL.h"
 #include "SceTypes.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
@@ -111,6 +117,17 @@ static std::mutex g_mutex;
 static std::array<std::mutex, PORTS_MAX> g_outputMutexes;
 static Port g_ports[PORTS_MAX];
 static bool g_sdlInitialized = false;
+
+static void raiseOutputThreadPriority() {
+#ifdef _WIN32
+    thread_local bool raised = false;
+    if (raised) return;
+    if (SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) == 0) {
+        throw std::runtime_error("sceAudioOutOutput: SetThreadPriority failed (error " + std::to_string(GetLastError()) + ")");
+    }
+    raised = true;
+#endif
+}
 
 static bool ensureSdlAudio() {
     if (g_sdlInitialized) {
