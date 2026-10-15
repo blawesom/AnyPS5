@@ -186,10 +186,7 @@ int32_t APS5_VABI sceAudioInHqOpen(int32_t user_id, uint32_t type, uint32_t inde
 int32_t APS5_VABI sceAudioInAsyncOpen(int32_t user_id, uint32_t type, uint32_t index, uint32_t len, uint32_t freq, uint32_t param) {
     (void)user_id;
     const int error = checkArguments(type, index, len, freq);
-    if (error == AUDIO_IN_ERROR_INVALID_SIZE && len <= MAX_ASYNC_LEN) {
-        NotImplemented_nid_no_patch(__func__);
-        return 0;
-    }
+    if (error == AUDIO_IN_ERROR_INVALID_SIZE && len > 0 && len <= MAX_ASYNC_LEN) return openPort(len, freq, param, __func__);
     if (error != 0) return error;
     return openPort(len, freq, param, __func__);
 }
