@@ -123,22 +123,22 @@ def sce_module():
     return image
 
 
-def run_module(relinker, work, name, module):
+def run_module(relinker, work, name, module, flags):
     case = work / name
     (case / "sce_module").mkdir(parents=True)
     (case / "input.elf").write_bytes(importing_executable([]))
     (case / "sce_module" / "libExample.prx").write_bytes(module)
-    result = subprocess.run([str(relinker), "--windows", str(case / "input.elf"), str(case / "output.exe")],
+    result = subprocess.run([str(relinker), *flags, str(case / "input.elf"), str(case / "output.exe")],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0 and (case / "app0" / "sce_module" / "libExample.prx.guest.prx").exists(), (
         name, result.stdout, result.stderr)
 
 
-def run(relinker, work, name, image, expected_error=None):
+def run(relinker, work, name, image, flags, expected_error=None):
     source = work / (name + ".elf")
     output = work / (name + ".exe")
     source.write_bytes(image)
-    result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
+    result = subprocess.run([str(relinker), "--skip-sce-module", *flags, str(source), str(output)],
                             capture_output=True, text=True, timeout=20)
     if expected_error is None:
         assert result.returncode == 0 and output.exists(), (name, result.stdout, result.stderr)
@@ -151,8 +151,9 @@ def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="anyps5-sce-module-code-extent-") as directory:
         work = Path(directory)
-        run(relinker, work, "sce-loader-path-without-interp-header", fixture(rodata_address=False, interp_header=False))
-        run_module(relinker, work, "sce-module-data-after-code", sce_module())
+        for system, flags in (("linux", []), ("windows", ["--windows"]), ("macos", ["--macos"])):
+            run(relinker, work, "sce-loader-path-without-interp-header-" + system, fixture(rodata_address=False, interp_header=False), flags)
+            run_module(relinker, work, "sce-module-data-after-code-" + system, sce_module(), flags)
     print("SCE module code extent tests passed")
 
 
