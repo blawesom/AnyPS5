@@ -53,6 +53,7 @@ constexpr int GuestEloop = 62;
 constexpr int GuestEnametoolong = 63;
 constexpr int GuestEnotempty = 66;
 constexpr int GuestEoverflow = 84;
+constexpr int GuestEopnotsupp = 45;
 constexpr int GuestAtFdcwd = -100;
 constexpr int GuestAtRemovedir = 0x800;
 constexpr std::size_t GuestPathMax = 1024;
@@ -370,8 +371,7 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
     if (target == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*target == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
     if (*target == '/') {
-        NotImplemented_nid_no_patch("symlink: absolute targets");
-        return -1;
+        return static_cast<int>(Fail(GuestEopnotsupp));
     }
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(created, native)) return static_cast<int>(Fail(error));
@@ -492,7 +492,7 @@ int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag)
 #ifdef __APPLE__
         if (::fchmodat(AT_FDCWD, native.c_str(), static_cast<mode_t>(mode & 07777), AT_SYMLINK_NOFOLLOW) != 0) {
             return static_cast<int>(Fail(GuestFileError(errno)));
-        }
+            return static_cast<int>(Fail(GuestEopnotsupp));        }
 #endif
         RecordWrittenPath_nid_no_patch(native);
         return 0;
