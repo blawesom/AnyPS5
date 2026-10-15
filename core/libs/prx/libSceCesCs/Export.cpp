@@ -181,7 +181,7 @@ int decodeMbcs(const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint3
         code = JisX0208::TO_UCS2[(lead - 0xA1) * 94 + (mbcs[1] - 0xA1)];
         return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
     }
-    if (lead == 0x8F) return CES_ERROR_UNASSIGNED_CODE;
+    if (lead == 0x8F) return mbcsMax < 3 ? CES_ERROR_SRC_BUFFER_END : CES_ERROR_UNASSIGNED_CODE;
     return CES_ERROR_INVALID_ENCODE;
 }
 
