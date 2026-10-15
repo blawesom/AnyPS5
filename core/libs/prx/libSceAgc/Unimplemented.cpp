@@ -30,14 +30,4 @@ int APS5_VABI sceAgcCbMemsetExclusive() {
  return 0;
 }
 
-int APS5_VABI sceAgcSetShaderInstrumentation() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
-}
-
-int APS5_VABI sceAgcGetShaderInstrumentation() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
-}
-
 }
