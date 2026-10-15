@@ -422,7 +422,9 @@ Outcome Run(const Case& test) {
             hold.unlock();
             if (Holds(surface.Texels(), Stored)) return Outcome::Missed;
             Require(std::chrono::steady_clock::now() < deadline, "store over untracked: the surface's result neither became pending nor reached guest memory");
-            std::this_thread::yield();
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> surfaceRange{{{address, address + SurfaceBytes}}};
+            if (StorageTexture::FindLive(address, SurfaceBytes) != nullptr && StorageTexture::AnyPendingOverlaps(surfaceRange)) break;
+            Require(std::chrono::steady_clock::now() < deadline, "store over untracked: the surface's storage result never became pending");            std::this_thread::yield();
         }
         const auto from = StorageTexture::FindLive(source->Address(), Block);
         const auto to = StorageTexture::FindLive(address + LastBlock, Block);
