@@ -37,7 +37,6 @@ int APS5_VABI sceNpWebApi2AddHttpRequestHeader(int64_t request_id, const char* f
 }
 
 int APS5_VABI sceNpWebApi2AddWebTraceTag() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -120,8 +119,6 @@ int APS5_VABI sceNpWebApi2PushEventCreateHandle(int lib_ctx_id) {
 
 int APS5_VABI sceNpWebApi2PushEventAbortHandle(int libCtxId, int handleId) {
     (void)handleId;
-    std::lock_guard lock(g_poolsMutex);
-    if (!g_pools.contains(libCtxId)) throw std::invalid_argument("sceNpWebApi2PushEventAbortHandle: unknown context");
     return 0;
 }
 
