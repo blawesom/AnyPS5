@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <functional>
 #include <mutex>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -105,7 +107,85 @@ struct Port {
     std::uint64_t virtualQueueEnd = 0;
     SDL_AudioDeviceID device = 0;
     SDL_AudioSpec spec = {};
+    std::uint64_t traceLastCallUs = 0;
+    std::uint64_t traceWindowStartUs = 0;
+    std::uint32_t traceCalls = 0;
+    std::uint32_t traceIntervalsOver2Periods = 0;
+    std::uint32_t traceIntervalsOver40Ms = 0;
+    std::uint64_t traceIntervalSumUs = 0;
+    std::uint64_t traceIntervalMaxUs = 0;
+    std::uint32_t traceQueueMinMs = 0xffffffffu;
+    std::uint32_t traceQueueMaxMs = 0;
+    std::uint32_t traceDataCalls = 0;
+    std::uint32_t traceDrainClears = 0;
+    std::uint64_t traceDrainSumUs = 0;
+    std::uint64_t traceDrainMaxUs = 0;
+    std::uint64_t pacingLastCallUs = 0;
+    std::uint64_t pacingWindowEndUs = 0;
+    std::uint64_t pacingMaxGapUs = 0;
+    std::uint32_t traceThreadIds[4] = {};
+    std::uint32_t traceThreadCounts[4] = {};
 };
+
+static void traceOutputCall(Port& port, bool data) {
+    static const bool trace = std::getenv("APS5_TRACE_AUDIOOUT_OUTPUT") != nullptr;
+    if (!trace || port.device == 0) return;
+    const std::uint64_t now = sceKernelGetProcessTime();
+    const auto bytesPerMs = port.spec.freq != 0
+        ? static_cast<std::uint32_t>(std::max<std::uint64_t>(1, static_cast<std::uint64_t>(port.spec.freq) * port.spec.channels * (SDL_AUDIO_BITSIZE(port.spec.format) / 8) / 1000))
+        : 1u;
+    const auto queuedMs = static_cast<std::uint32_t>(std::min<std::uint64_t>(0xffffffffu, SDL_GetQueuedAudioSize(port.device) / bytesPerMs));
+    const auto periodUs = port.freq != 0 ? (1000000ULL * port.samplesNum) / port.freq : 0;
+    if (port.traceWindowStartUs == 0) port.traceWindowStartUs = now;
+    if (port.traceLastCallUs != 0 && now > port.traceLastCallUs) {
+        const auto interval = now - port.traceLastCallUs;
+        ++port.traceCalls;
+        if (data) ++port.traceDataCalls;
+        port.traceIntervalSumUs += interval;
+        port.traceIntervalMaxUs = std::max(port.traceIntervalMaxUs, interval);
+        if (periodUs != 0 && interval > 2 * periodUs) ++port.traceIntervalsOver2Periods;
+        if (interval > 40000) ++port.traceIntervalsOver40Ms;
+    }
+    port.traceQueueMinMs = std::min(port.traceQueueMinMs, queuedMs);
+    port.traceQueueMaxMs = std::max(port.traceQueueMaxMs, queuedMs);
+    port.traceLastCallUs = now;
+    {
+        const auto id = static_cast<std::uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        std::size_t slot = 0;
+        while (slot < 4 && port.traceThreadIds[slot] != 0 && port.traceThreadIds[slot] != id) ++slot;
+        if (slot < 4) {
+            port.traceThreadIds[slot] = id;
+            ++port.traceThreadCounts[slot];
+        }
+    }
+    if (now - port.traceWindowStartUs >= 5000000) {
+        const auto avg = port.traceCalls != 0 ? port.traceIntervalSumUs / port.traceCalls : 0;
+        const auto drainAvg = port.traceCalls != 0 ? port.traceDrainSumUs / port.traceCalls : 0;
+        char threads[96];
+        int offset = 0;
+        for (std::size_t slot = 0; slot < 4 && port.traceThreadIds[slot] != 0 && offset < 80; ++slot) {
+            offset += std::snprintf(threads + offset, sizeof(threads) - offset, "%s%u:%u", slot == 0 ? "" : ",", static_cast<unsigned>(slot), port.traceThreadCounts[slot]);
+        }
+        if (offset == 0) std::snprintf(threads, sizeof(threads), "none");
+        std::fprintf(stderr, "[audioout] type %d %u Hz: %u calls (%u data)/5 s, interval avg %llu us max %llu us, over 2 periods %u, over 40 ms %u, queued ms min %u max %u, drain avg %llu us max %llu us, drain clears %u, threads %s\n", port.type, port.freq, port.traceCalls, port.traceDataCalls, static_cast<unsigned long long>(avg), static_cast<unsigned long long>(port.traceIntervalMaxUs), port.traceIntervalsOver2Periods, port.traceIntervalsOver40Ms, port.traceQueueMinMs == 0xffffffffu ? 0 : port.traceQueueMinMs, port.traceQueueMaxMs, static_cast<unsigned long long>(drainAvg), static_cast<unsigned long long>(port.traceDrainMaxUs), port.traceDrainClears, threads);
+        port.traceWindowStartUs = now;
+        port.traceCalls = 0;
+        port.traceDataCalls = 0;
+        port.traceIntervalsOver2Periods = 0;
+        port.traceIntervalsOver40Ms = 0;
+        port.traceIntervalSumUs = 0;
+        port.traceIntervalMaxUs = 0;
+        port.traceQueueMinMs = 0xffffffffu;
+        port.traceQueueMaxMs = 0;
+        port.traceDrainClears = 0;
+        port.traceDrainSumUs = 0;
+        port.traceDrainMaxUs = 0;
+        for (std::size_t slot = 0; slot < 4; ++slot) {
+            port.traceThreadIds[slot] = 0;
+            port.traceThreadCounts[slot] = 0;
+        }
+    }
+}
 
 static std::mutex g_mutex;
 static std::array<std::mutex, PORTS_MAX> g_outputMutexes;
@@ -211,6 +291,7 @@ static void sleepUs(std::unique_lock<std::mutex>& lock, std::uint64_t us) {
 }
 
 static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex>& lock) {
+    traceOutputCall(port, data != nullptr);
     if (data == nullptr) {
         const std::uint64_t waitStart = sceKernelGetProcessTime();
         while (SDL_GetQueuedAudioSize(port.device) > 0) {
@@ -234,18 +315,38 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
     const std::uint64_t bufferUs = port.freq != 0
         ? (1000000ULL * port.samplesNum) / port.freq
         : 0;
+    static const std::uint64_t maxLatencyUs = [] {
+        const char* text = std::getenv("APS5_AUDIOOUT_MAX_LATENCY_US");
+        if (text == nullptr) return 250000ULL;
+        const auto parsed = std::strtoull(text, nullptr, 10);
+        return parsed != 0 ? std::clamp<std::uint64_t>(parsed, TARGET_LATENCY_US, 1000000ULL) : 250000ULL;
+    }();
+    const std::uint64_t now = sceKernelGetProcessTime();
+    if (port.pacingWindowEndUs == 0) port.pacingWindowEndUs = now + 10000000;
+    if (port.pacingLastCallUs != 0 && now > port.pacingLastCallUs) port.pacingMaxGapUs = std::max(port.pacingMaxGapUs, now - port.pacingLastCallUs);
+    port.pacingLastCallUs = now;
+    if (now >= port.pacingWindowEndUs) {
+        port.pacingWindowEndUs = now + 10000000;
+        port.pacingMaxGapUs -= port.pacingMaxGapUs / 4;
+    }
+    const auto targetLatencyUs = std::clamp(port.pacingMaxGapUs + bufferUs, TARGET_LATENCY_US, maxLatencyUs);
     const std::uint32_t buffers = bufferUs != 0
-        ? static_cast<std::uint32_t>((TARGET_LATENCY_US + bufferUs - 1) / bufferUs)
+        ? static_cast<std::uint32_t>((targetLatencyUs + bufferUs - 1) / bufferUs)
         : 2u;
-    const std::uint32_t minQueued = queueSize * std::clamp(buffers, 2u, 16u);
+    const std::uint32_t minQueued = queueSize * std::clamp(buffers, 2u, 512u);
     const std::uint64_t waitStart = sceKernelGetProcessTime();
 
     while (SDL_GetQueuedAudioSize(port.device) > minQueued) {
         if (sceKernelGetProcessTime() - waitStart > DRAIN_TIMEOUT_US) {
             SDL_ClearQueuedAudio(port.device);
+            port.traceDrainClears += 1;
             break;
         }
         sleepUs(lock, DRAIN_SLEEP_US);
+    }
+    if (const std::uint64_t waited = sceKernelGetProcessTime() - waitStart; waited != 0) {
+        port.traceDrainSumUs += waited;
+        port.traceDrainMaxUs = std::max(port.traceDrainMaxUs, waited);
     }
 
     if (SDL_QueueAudio(port.device, queueData, queueSize) < 0) {
