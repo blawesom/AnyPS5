@@ -58,6 +58,9 @@ void* AllocateAligned(std::size_t size, std::size_t alignment) {
 
 }
 
+}
+
+
 extern "C" {
 
 #ifdef _WIN32
@@ -102,6 +105,11 @@ unsigned char _ZSt7nothrow_nid_postfix = 0;
 void* APS5_VABI _Znwm_nid_postfix(std::size_t size) {
     return Allocate(size);
 }
+
+void* APS5_VABI _ZnwmSt11align_val_t_nid_postfix(std::size_t size, std::size_t align) {
+    return AllocateAligned(size, align);
+}
+
 
 void* APS5_VABI _Znam_nid_postfix(std::size_t size) {
     return Allocate(size);
