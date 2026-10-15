@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -17,7 +18,7 @@ class ProgressRenderSliverTests(unittest.TestCase):
         self.assertIn("<svg", svg)
         self.assertIn(">libA</text>", svg)
         self.assertNotIn(">lib</text>", svg)
-
+        self.assertNotRegex(svg, re.compile(r'font-size="12"[^>]*>lib</text>'))
     def test_cells_without_area(self):
         self.assertEqual(progress.cells(5, 0, 0, 0, 10), [])
         self.assertEqual(progress.cells(5, 0, 0, -1, 10), [])

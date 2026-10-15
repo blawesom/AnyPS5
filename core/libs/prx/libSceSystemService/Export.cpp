@@ -78,8 +78,7 @@ constexpr wchar_t MainExecutableVariableWide[] = L"APS5_EBOOT";
 #endif
 
 [[noreturn]] void UnconvertedExecutable(const std::string& message) {
-    NotImplemented_nid_no_patch(("sceSystemServiceLoadExec: " + message).c_str());
-    std::abort();
+    throw std::runtime_error("sceSystemServiceLoadExec: " + message);
 }
 
 std::string ConvertedExecutableName(const char* path) {
