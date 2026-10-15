@@ -6,6 +6,7 @@
 - [sceSystemServiceLaunchWebBrowser](../../../core/libs/prx/libSceSystemService/Export.cpp) (libSceSystemService) - AnyPS5 launches no web browser, so the call fails and nothing is shown. RommPS PPSA76677 then tells the player to scan its QR code instead
 - [sceSystemServiceShowControllerSettings](../../../core/libs/prx/libSceSystemService/Export.cpp) (libSceSystemService) - returns success without showing the controller settings: AnyPS5 has no system UI to open. Cat Quest III (PPSA15065) imports it
 - [sceSystemServiceOpenChallengeActivity](../../../core/libs/prx/libSceSystemService/Export.cpp) (libSceSystemService) - returns success without opening the challenge activity: AnyPS5 has no system UI to open. Cat Quest III (PPSA15065) imports it
+- [sceSystemServiceOpenTournamentOccurrence](../../../core/libs/prx/libSceSystemService/Export.cpp) (libSceSystemService) - returns success without opening a system UI: AnyPS5 has no system UI to open
 
 ### Unknown function info
 
