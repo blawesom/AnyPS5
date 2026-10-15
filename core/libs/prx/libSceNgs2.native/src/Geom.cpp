@@ -231,11 +231,12 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
         DistanceGain(*source, distance) * ConeGain(*listener, *source, local, distance),
         std::min(source->min_level, source->max_level), source->max_level);
     if ((flags & GEOM_FLAG_SOURCE_DOPPLER) != 0) attribute.pitch_ratio = DopplerRatio(*listener, *source, local, distance);
-    if ((flags & GEOM_FLAG_A3D_ATTRIBUTE) != 0) {
+    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_A3D_ATTRIBUTE)) != 0) {
         attribute.a3d_attrib.position = local;
         attribute.a3d_attrib.volume = level;
     if ((flags & GEOM_FLAG_VOLUME_MATRIX) != 0) {
-        const float angle = distance > 1e-6f ? std::atan2(local.x, local.z) * 180.0f / std::numbers::pi_v<float> : 0.0f;
+    }
+    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_VOLUME_MATRIX)) != 0) {        const float angle = distance > 1e-6f ? std::atan2(local.x, local.z) * 180.0f / std::numbers::pi_v<float> : 0.0f;
         const float panDistance = distance > 1e-6f ? std::clamp(local.z / distance, -1.0f, 1.0f) : 1.0f;
         Ngs2PanWork pan{};
         Ngs2PanParam param{angle, panDistance, source->fbw_level, source->lfe_level};
@@ -244,6 +245,14 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
         if (Ngs2PanInit(&pan, nullptr, 360.0f, source->num_speakers) != SCE_NGS2_OK ||
             Ngs2PanGetVolumeMatrix(&pan, &param, 1, outputChannels, panLevels) != SCE_NGS2_OK) {
             throw std::runtime_error("NGS2: geometry pan calculation failed");
+        }
+        const float radiusWeight = distance > 1e-6f ? 1.0f - std::clamp(source->radius / distance, 0.0f, 1.0f) : 0.0f;
+        const bool hasLfe = outputChannels == 6 || outputChannels == 8;
+        const std::uint32_t fullBandChannels = outputChannels - (hasLfe ? 1 : 0);
+        const float evenLevel = source->fbw_level / std::sqrt(static_cast<float>(fullBandChannels));
+        for (std::uint32_t output = 0; output < outputChannels; output++) {
+            if (hasLfe && output == 3) continue;
+            panLevels[output] = radiusWeight * panLevels[output] + (1.0f - radiusWeight) * evenLevel;
         }
         for (std::uint32_t input = 0; input < source->matrix_format; input++) {
             for (std::uint32_t output = 0; output < outputChannels; output++) {
