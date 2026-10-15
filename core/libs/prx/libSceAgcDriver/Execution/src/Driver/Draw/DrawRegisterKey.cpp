@@ -154,6 +154,7 @@ std::uint64_t Driver::drawRegisterKey(const QueueState& queue, const ShaderRegis
                 mixOther(value);
                 return;
             }
+            if (word->forwarded) return;
             auto& stage = content[DrawAliasKeys::Stage(offset)];
             stage = (stage ^ offset ^ relocatedContentKey(*word, value, readable)) * 0x100000001b3ull;
         });

@@ -129,6 +129,7 @@ struct RelocatableUserWord {
     std::uint32_t reg;
     std::vector<std::pair<std::int64_t, std::uint32_t>> reads;
     std::vector<std::int64_t> dataOffsets;
+    bool forwarded = false;
 };
 
 struct DrawRelocation {

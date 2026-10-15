@@ -114,7 +114,12 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
                 cacheLock.lock();
             }
             if (drawIdentity != 0) drawRelocationPending = {drawKey, drawIdentity, drawAliases, relocation};
-            if (drawAliases.structure != 0) relocateDrawEntry(queue, drawAliases, entry, decode, userPatches);
+            if (drawAliases.structure != 0 && !relocateDrawEntry(queue, drawAliases, entry, decode, userPatches) && drawDataHits() && !drawParameters.indirect && drawShapes.contains(shapeKey)) {
+                entry.reset();
+                decode.reset();
+                userPatches.clear();
+                drawStageDonorKeys.clear();
+            }
             if (relocation != nullptr) {
                 auto& trial = drawRelocationTrials[drawIdentity];
                 ++trial.lookups;
