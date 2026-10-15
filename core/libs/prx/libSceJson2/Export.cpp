@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <list>
 #include <mutex>
 #include <stdexcept>
@@ -934,9 +935,23 @@ void APS5_VABI _ZN3sce4Json6Object4PairD1Ev(Pair* self) {
     Destroy(self->value);
 }
 
-int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+ObjectIterator* APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE(ObjectIterator* result, Object* self, const Pair* pair) {
+    auto existing = std::find_if(self->items->begin(), self->items->end(), [&](const Pair& current) { return *current.key.text == *pair->key.text; });
+    if (existing != self->items->end()) {
+        result->it = existing;
+        return result;
+    }
+    Pair copy{};
+    Construct(copy.key, *pair->key.text);
+    try {
+        CopyInto(copy.value, pair->value);
+    } catch (...) {
+        Destroy(copy.key);
+        throw;
+    }
+    self->items->push_back(copy);
+    result->it = std::prev(self->items->end());
+    return result;
 }
 
 ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratorppEi(ArrayIterator* result, ArrayIterator* self, int) {
