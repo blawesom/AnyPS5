@@ -10,6 +10,8 @@
 
 ### Functional
 
+- [sceNpSetContentRestriction](../../../core/libs/prx/libSceNpManager/Export.cpp) (libSceNpManager) accepts the opaque restriction record and returns success without storing it because the offline signed-out NP model has no content-restriction enforcement path.
+
 - [Game presence callback](../../../core/libs/prx/libSceNpManager/Export.cpp) (libSceNpManager) - registration is accepted as a no-op because the offline NP model never publishes presence events. The callback is not invoked
 
 - [NP reachability callbacks](../../../core/libs/prx/libSceNpManager/Export.cpp) retain one callback and its user data; duplicate registration and unregistering an absent callback return the errors used by [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/945dbc3cc3eee80ac3e053b438502ed936fa6bb2/src/core/libraries/np/np_manager.cpp). No callback is delivered because the existing NP model remains signed out with reachability unavailable.
