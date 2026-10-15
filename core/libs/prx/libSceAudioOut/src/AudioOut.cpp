@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -318,8 +319,11 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
     static const std::uint64_t maxLatencyUs = [] {
         const char* text = std::getenv("APS5_AUDIOOUT_MAX_LATENCY_US");
         if (text == nullptr) return 250000ULL;
-        const auto parsed = std::strtoull(text, nullptr, 10);
-        return parsed != 0 ? std::clamp<std::uint64_t>(parsed, TARGET_LATENCY_US, 1000000ULL) : 250000ULL;
+        std::uint64_t parsed = 0;
+        const auto [end, error] = std::from_chars(text, text + std::strlen(text), parsed);
+        return error == std::errc{} && *end == '\0' && parsed != 0
+            ? std::clamp<std::uint64_t>(parsed, TARGET_LATENCY_US, 1000000ULL)
+            : 250000ULL;
     }();
     const std::uint64_t now = sceKernelGetProcessTime();
     if (port.pacingWindowEndUs == 0) port.pacingWindowEndUs = now + 10000000;
