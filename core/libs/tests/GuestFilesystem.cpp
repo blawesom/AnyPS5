@@ -552,6 +552,28 @@ int main() {
         { std::ifstream stream(fullDirectory / "entry"); std::string contents; std::getline(stream, contents); Require(contents == "entry"); }
         { std::ifstream stream(kernelTarget / "marker"); std::string contents; std::getline(stream, contents);
           Require(contents == "kernel directory contents"); }
+#ifdef _WIN32
+        for (const bool kernel : {true, false}) {
+            const auto lockedSource = area / (kernel ? "locked_kernel_source" : "locked_libc_source");
+            const auto preservedTarget = area / (kernel ? "preserved_kernel_target" : "preserved_libc_target");
+            Require(std::filesystem::create_directory(lockedSource));
+            Require(std::filesystem::create_directory(preservedTarget));
+            const auto marker = lockedSource / "marker";
+            { std::ofstream stream(marker); stream << "preserved source contents"; }
+            const HANDLE held = CreateFileW(marker.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            Require(held != INVALID_HANDLE_VALUE);
+            const int result = kernel ? sceKernelRename(name(lockedSource).c_str(), name(preservedTarget).c_str()) :
+                rename_nid_postfix(name(lockedSource).c_str(), name(preservedTarget).c_str());
+            Require(CloseHandle(held) != 0);
+            Require(result != 0 && std::filesystem::is_regular_file(marker));
+            if (!std::filesystem::is_directory(preservedTarget))
+                std::fprintf(stderr, "failed %s directory rename removed its destination\n", kernel ? "kernel" : "libc");
+            Require(std::filesystem::is_directory(preservedTarget) && std::filesystem::is_empty(preservedTarget));
+            { std::ifstream stream(marker); std::string contents; std::getline(stream, contents);
+              Require(contents == "preserved source contents"); }
+        }
+#endif
         for (const bool kernel : {false, true}) {
             const auto incoming = name(area / "incoming.txt");
             const auto occupied = name(area / "occupied.txt");
