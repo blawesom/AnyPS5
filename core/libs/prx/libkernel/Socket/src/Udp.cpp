@@ -977,11 +977,12 @@ int APS5_VABI setsockopt_nid_postfix(int descriptor, int level, int option,
     }
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
-    if (level != 0xffff && level != 6) return Fail(42);
+    if (level != 0xffff && level != 6 && level != 41) return Fail(42);
     std::lock_guard lock(socket->modeMutex);
     const auto native = static_cast<std::uintptr_t>(socket->value);
-    const int error = level == 6 ? GuestSockets::SetTcpLevelOption(native, socket->family != GuestUnix && socket->type == 1, option, value, length)
-                                 : GuestSockets::SetSocketLevelOption(native, socket->options, option, value, length);
+    const int error = level == 6    ? GuestSockets::SetTcpLevelOption(native, socket->family != GuestUnix && socket->type == 1, option, value, length)
+                      : level == 41 ? GuestSockets::SetIpv6LevelOption(native, socket->family == 28, option, value, length)
+                                    : GuestSockets::SetSocketLevelOption(native, socket->options, option, value, length);
     return error == 0 ? 0 : Fail(error);
 }
 int APS5_VABI getsockopt_nid_postfix(int descriptor, int level, int option,
@@ -991,16 +992,16 @@ int APS5_VABI getsockopt_nid_postfix(int descriptor, int level, int option,
     if (static_cast<std::int32_t>(available) < 0) return Fail(22);
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
-    if (level != 0xffff && level != 6) return Fail(42);
+    if (level != 0xffff && level != 6 && level != 41) return Fail(42);
     std::lock_guard lock(socket->modeMutex);
     const auto native = static_cast<std::uintptr_t>(socket->value);
-    const int error = level == 6 ? GuestSockets::GetTcpLevelOption(native, socket->family != GuestUnix && socket->type == 1, option, value, &available)
-                                 : GuestSockets::GetSocketLevelOption(native, socket->options, socket->type, option, value, &available);
+    const int error = level == 6    ? GuestSockets::GetTcpLevelOption(native, socket->family != GuestUnix && socket->type == 1, option, value, &available)
+                    : level == 41 ? GuestSockets::GetIpv6LevelOption(native, socket->family == 28, option, value, &available)
+                                  : GuestSockets::GetSocketLevelOption(native, socket->options, socket->type, option, value, &available);
     if (error != 0) return Fail(error);
     if (!length) return Fail(14);
     *length = available;
-    return 0;
-}
+    return 0;}
 int APS5_VABI socket_nid_postfix(int family, int type, int protocol) {
     const bool nonblocking = (type & GuestNonBlocking) != 0;
     const int plainType = type & ~(GuestCloseOnExec | GuestNonBlocking);
