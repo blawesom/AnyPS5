@@ -699,7 +699,7 @@ int VnodeDescriptorError(int descriptor) {
 
 void RequireVnodeNotes(std::uint32_t fflags) {
     if ((fflags & ~MAPPED_NOTES) != 0) {
-        NotImplemented_nid_no_patch(("EVFILT_VNODE: fflags " + std::to_string(fflags & ~MAPPED_NOTES)).c_str());
+        throw std::invalid_argument("EVFILT_VNODE: unsupported fflags " + std::to_string(fflags & ~MAPPED_NOTES));
     }
 }
 
