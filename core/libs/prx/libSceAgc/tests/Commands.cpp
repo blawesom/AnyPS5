@@ -432,6 +432,16 @@ void testFlip() {
     full.buffer.cursor_down = full.words.data() + 3;
     expectFailure([&] { sceAgcAcbWaitUntilSafeForRendering(&full.buffer, 1, 0); });
     check(full.buffer.cursor_up == full.words.data(), "failed compute rendering wait advanced cursor");
+    Storage acbFlip;
+    acbFlip.words.fill(0xdeadbeefu);
+    auto* computeFlip = sceAgcAcbSetFlip(&acbFlip.buffer, 0xfedcba98u, -2, 0x12345678u, -0x123456789abcdefLL);
+    check(computeFlip == acbFlip.words.data() && std::equal(expected.begin(), expected.end(), computeFlip), "compute flip packet mismatch");
+    check(acbFlip.buffer.cursor_up == computeFlip + 6 && computeFlip[6] == 0xdeadbeefu, "compute flip packet overran allocation");
+    expectFailure([] { sceAgcAcbSetFlip(nullptr, 1, 0, 1, 0); });
+    Storage fullFlip;
+    fullFlip.buffer.cursor_down = fullFlip.words.data() + 5;
+    expectFailure([&] { sceAgcAcbSetFlip(&fullFlip.buffer, 1, 0, 1, 0); });
+    check(fullFlip.buffer.cursor_up == fullFlip.words.data(), "failed compute flip allocation advanced cursor");
     check(sceAgcSuspendPoint() == 0, "empty suspend failed");
 }
 
