@@ -76,7 +76,7 @@ struct ImageMirror {
     std::uint64_t serial = 0;
 };
 
-// The address space. An address-based build maps every readable registered range; building that
+// The address space. An address-based build maps every readable GPU-registered range; building that
 // list per build (the lease's ~1200 shared_ptrs, an import lookup per range, the sort and merge, the
 // upload loop, the BDA table) repeated the same result while the registry stood still. One space is
 // cached per device and taken by every build made while it is current: a pure function of the
