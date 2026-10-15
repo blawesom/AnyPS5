@@ -131,8 +131,7 @@ std::int64_t ReadNativeLink(const std::filesystem::path& native, char* buffer, s
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         std::string target;
         if (!File::WindowsSymbolicLink::ReadRelative(native, target, "readlink")) {
-            NotImplemented_nid_no_patch("readlink of a Windows reparse point other than a relative symbolic link");
-            return -1;
+            return Fail(GuestEinval);
         }
         return CopyLinkTarget(target, buffer, size);
     }
@@ -240,8 +239,7 @@ int RenamePath(const std::filesystem::path& source, const std::filesystem::path&
 extern "C" {
 
 int APS5_VABI fork_nid_postfix(void) {
-    NotImplemented_nid_no_patch("fork: child processes");
-    return -1;
+    return static_cast<int>(Fail(78));
 }
 
 int APS5_VABI setsid_nid_postfix(void) {
