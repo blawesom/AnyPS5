@@ -140,7 +140,8 @@ int APS5_VABI sceNpPollAsync(int req_id, int* result) {
 void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata) {
  (void)callback;
  (void)userdata;
-}
+    (void)callback;
+    (void)userdata;}
 
 int APS5_VABI sceNpRegisterNpReachabilityStateCallback(void* callback, void* userdata) {
     if (!callback) return SCE_NP_ERROR_INVALID_ARGUMENT;
@@ -180,7 +181,8 @@ int APS5_VABI sceNpRegisterStateCallback(void* callback, void* userdata) {
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction) {
  (void)restriction;
  return 0;
-}
+    (void)restriction;
+    return 0;}
 
 int APS5_VABI sceNpSetNpTitleId(const NpTitleId* title_id, const NpTitleSecret* title_secret) {
     (void)title_id;
