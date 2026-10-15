@@ -131,7 +131,12 @@ uint32_t encodeUtf8(uint32_t code, uint8_t* utf8) {
     utf8[0] = static_cast<uint8_t>(0xE0 | code >> 12);
     utf8[1] = static_cast<uint8_t>(0x80 | (code >> 6 & 0x3F));
     utf8[2] = static_cast<uint8_t>(0x80 | (code & 0x3F));
-    return 3;
+    if (code < 0x10000) return 3;
+    utf8[0] = static_cast<uint8_t>(0xF0 | (code >> 18));
+    utf8[1] = static_cast<uint8_t>(0x80 | (code >> 12 & 0x3F));
+    utf8[2] = static_cast<uint8_t>(0x80 | (code >> 6 & 0x3F));
+    utf8[3] = static_cast<uint8_t>(0x80 | (code & 0x3F));
+    return 4;
 }
 
 constexpr uint8_t EUC_JP_TAG[8] = {'E', 'U', 'C', 'J', 'P', '9', '3', '2'};
@@ -176,7 +181,7 @@ int decodeMbcs(const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint3
         code = JisX0208::TO_UCS2[(lead - 0xA1) * 94 + (mbcs[1] - 0xA1)];
         return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
     }
-    if (lead == 0x8F) NotImplemented_nid_no_patch("EUC-JP JIS X 0212 characters");
+    if (lead == 0x8F) return CES_ERROR_UNASSIGNED_CODE;
     return CES_ERROR_INVALID_ENCODE;
 }
 
@@ -367,7 +372,7 @@ int APS5_VABI sceCesEucJpToUcs2(const void* profile, const uint8_t* euc, uint32_
 }
 
 int APS5_VABI sceCesSbcToUtf8(const uint8_t* profile, uint8_t sbc, uint8_t* utf8, uint32_t utf8max, uint32_t* utf8_len) {
-    if (profile != CP1252_PROFILE && profile != CP1251_PROFILE) return CES_ERROR_INVALID_PARAMETER;
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
     if (!utf8) return CES_ERROR_INVALID_DST_BUFFER;
 
     uint8_t encoded[3];
@@ -379,7 +384,7 @@ int APS5_VABI sceCesSbcToUtf8(const uint8_t* profile, uint8_t sbc, uint8_t* utf8
 }
 
 int APS5_VABI sceCesUtf8ToSbc(const uint8_t* utf8, uint32_t utf8max, uint32_t* utf8_len, const uint8_t* profile, uint8_t* sbc) {
-    if (profile != CP1252_PROFILE && profile != CP1251_PROFILE) return CES_ERROR_INVALID_PARAMETER;
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
     if (!utf8) return CES_ERROR_INVALID_SRC_BUFFER;
     if (utf8max == 0) return CES_ERROR_SRC_BUFFER_END;
     if (!sbc) return CES_ERROR_INVALID_DST_BUFFER;
