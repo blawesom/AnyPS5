@@ -716,7 +716,7 @@ void Pipeline::Begin(VkCommandBuffer commands, const Framebuffer& framebuffer, V
     apply(commands, state, false, recorded);
 }
 
-    if (optimized != nullptr) optimized->Schedule();
+namespace {
 
 bool filterDrawState() {
     static const bool filter = std::getenv("APS5_NO_DRAW_STATE_FILTER") == nullptr;
@@ -726,6 +726,7 @@ bool filterDrawState() {
 }
 
 void Pipeline::Continue(VkCommandBuffer commands, const State& state, PassDrawState* recorded) const {
+    if (optimized != nullptr) optimized->Schedule();
     apply(commands, state, filterDrawState() && libraries, recorded);
 }
 

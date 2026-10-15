@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 namespace AgcDriver::DriverDetail {
 
@@ -15,6 +16,55 @@ namespace {
 
 constexpr std::size_t MaxAliases = 16384;
 constexpr std::size_t MaxContentWords = 64;
+constexpr std::size_t MaxPooled = 1024;
+
+template <typename T>
+class RelocationPool {
+public:
+    std::shared_ptr<T> Take() {
+        T* object = nullptr;
+        {
+            std::lock_guard lock(mutex);
+            if (!spare.empty()) {
+                object = spare.back();
+                spare.pop_back();
+            }
+        }
+        if (object == nullptr) object = new T();
+        return std::shared_ptr<T>(object, [this](T* released) { Return(released); });
+    }
+    ~RelocationPool() {
+        for (auto* object : spare) delete object;
+    }
+
+private:
+    void Return(T* object) {
+        {
+            std::lock_guard lock(mutex);
+            if (spare.size() < MaxPooled) {
+                spare.push_back(object);
+                return;
+            }
+        }
+        delete object;
+    }
+    std::mutex mutex;
+    std::vector<T*> spare;
+};
+
+RelocationPool<DispatchVariant>& variantPool() {
+    static RelocationPool<DispatchVariant> pool;
+    return pool;
+}
+
+RelocationPool<DrawEntry>& entryPool() {
+    static RelocationPool<DrawEntry> pool;
+    return pool;
+}
+
+struct RelocationMove {
+    std::uint32_t index, from, to;
+};
 
 std::uint64_t AlignedWord(std::uint32_t word) {
     return word & ~std::uint32_t {3};
@@ -239,10 +289,16 @@ bool Driver::relocateDrawEntry(const QueueState& queue, const DrawAliasKeys& ali
     const auto shared = known->second.decode;
     const auto& stageKeys = known->second.stageKeys;
     const auto& programs = shared->programs;
-    auto relocated = std::make_shared<DrawEntry>();
+    auto relocated = entryPool().Take();
     relocated->decode = shared;
+    relocated->recipes = nullptr;
+    relocated->touched = 0;
+    relocated->shape = 0;
+    for (auto& stage : relocated->stages) stage.clear();
     relocated->stages.resize(programs.size());
-    std::vector<DrawUserPatch> current;
+    static thread_local std::vector<RelocationMove> moves;
+    static thread_local std::vector<DrawUserPatch> current;
+    current.clear();
     bool complete = true;
     drawStageDonorKeys.assign(programs.size(), 0);
     for (std::size_t i = 0; i < programs.size(); ++i) {
@@ -251,10 +307,7 @@ bool Driver::relocateDrawEntry(const QueueState& queue, const DrawAliasKeys& ali
         const auto found = i < stageKeys.size() && stageKeys[i] != 0 ? drawStageDonors.find(aliases.Key(stageKeys[i], program.userDataBase)) : drawStageDonors.end();
         if (found != drawStageDonors.end()) drawStageDonorKeys[i] = found->first;
         const auto* donor = found != drawStageDonors.end() && found->second.variant != nullptr && found->second.variant->compiled != nullptr && found->second.userData.size() == program.userData.size() ? &found->second : nullptr;
-        struct Move {
-            std::uint32_t index, from, to;
-        };
-        std::vector<Move> moves;
+        moves.clear();
         bool allowed = donor != nullptr;
         for (std::uint32_t index = program.hiddenUserWords; index < program.userData.size(); ++index) {
             const auto now = readUserData(queue.shader, program.userDataBase + index - program.hiddenUserWords);
@@ -291,14 +344,14 @@ bool Driver::relocateDrawEntry(const QueueState& queue, const DrawAliasKeys& ali
         relocated->stages[i].push_back(std::move(copy));
     }
     if (complete) ++counters.donors;
-    patches = std::move(current);
+    patches = current;
     entry = std::move(relocated);
     decode = shared;
     return complete;
 }
 
 std::shared_ptr<DispatchVariant> Driver::cloneVariant(const DispatchVariant& variant) {
-    auto copy = std::make_shared<DispatchVariant>();
+    auto copy = variantPool().Take();
     copy->runs = variant.runs;
     copy->runBases = variant.runBases;
     copy->relocatableWords = variant.relocatableWords;
@@ -316,6 +369,12 @@ std::shared_ptr<DispatchVariant> Driver::cloneVariant(const DispatchVariant& var
     copy->patchedPushConstants = variant.patchedPushConstants;
     copy->shaderDataPatches = variant.shaderDataPatches;
     copy->vertexInfo = variant.vertexInfo;
+    copy->recipe = nullptr;
+    copy->dataPatched = false;
+    copy->memory.reset();
+    copy->captured.clear();
+    copy->spans.clear();
+    copy->generation.store(0, std::memory_order_relaxed);
     return copy;
 }
 
