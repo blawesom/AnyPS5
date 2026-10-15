@@ -2792,10 +2792,10 @@ void GuestBufferMemory::AcquireRegistered() {
     }
     if (space == nullptr) {
         // Pending GPU results in these ranges are stored when Upload prepares each region.
-        // Keep the complete snapshot only while discovering imports and regions. The address-space
-        // lease must retain only ranges that can be consumed by the GPU, otherwise CPU-only guest
-        // mappings stay pinned until the batch completes and make unrelated mprotect or munmap
-        // calls wait for GPU work.
+        // Keep the complete snapshot only while reconciling imports. The address-space lease must
+        // retain only ranges that can be consumed by the GPU, otherwise CPU-only guest mappings
+        // stay pinned until the batch completes and make unrelated mprotect or munmap calls wait
+        // for GPU work.
         auto registryLease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
         lap(timing.leaseUs, at);
         {
@@ -2810,6 +2810,12 @@ void GuestBufferMemory::AcquireRegistered() {
             // re-checks every pointer instead of trusting it.
             importsEpoch = state.epoch;
         }
+        GuestAllocations::Lease::Ranges gpuRanges;
+        gpuRanges.reserve(registryLease.size());
+        for (const auto& range : registryLease) {
+            if (range->readable && range->gpu) gpuRanges.push_back(range);
+        }
+        registryLease = GuestAllocations::Lease(std::move(gpuRanges));
         lap(timing.importsUs, at);
         // One pass in the registry's (ascending) order, so the regions come out sorted for AddSnapshot.
         // The import lock is taken per range: a mirror's preparation may wait for recorded work, which
@@ -2862,13 +2868,7 @@ void GuestBufferMemory::AcquireRegistered() {
             copies.push_back({copied.begin, copied.end, committed, reason});
         }
         releaseImportedMirrors(context, imported);
-        GuestAllocations::Lease::Ranges retainedRanges;
-        retainedRanges.reserve(regions.size());
-        for (const auto& range : registryLease) {
-            if (range->readable && range->gpu) retainedRanges.push_back(range);
-        }
-        lease = GuestAllocations::Lease(std::move(retainedRanges));
-        registryLease.clear();
+        lease = std::move(registryLease);
         regionsSorted = sortedLookup;
         static const std::uint64_t copyLimit = [] {
             const char* value = std::getenv("APS5_ADDRESS_COPY_MAX_MIB");
