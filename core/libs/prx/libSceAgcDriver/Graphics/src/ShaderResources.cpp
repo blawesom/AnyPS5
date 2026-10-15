@@ -670,7 +670,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     // surface's DCC keys uncompressed, so the keys are read after it.
     const auto flushStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const auto observedKeys = keys.has_value() ? *keys : scanKeys();
-    const bool stagedClear = source != nullptr && resource.dccAddress != 0 && (IsDccClear(observedKeys) || observedKeys == DccKeys::ClearSingle);
+    const bool stagedClear = source != nullptr && resource.dccAddress != 0 && !source->HasPendingResults() && (IsDccClear(observedKeys) || observedKeys == DccKeys::ClearSingle);
     bool stagedFlushed = false;
     if ((source == nullptr || stagedClear) && !clearThroughKeys && StorageTexture::FlushPending(address, bytes, nullptr, "sampled texture")) {
         if (profile) LookupOutcomes::Add(LookupOutcomes::PendingFlush, flushStart);
@@ -4677,6 +4677,9 @@ void ShaderResources::WriteBack() {
     for (std::size_t index = 0; index < storageTextures.size(); ++index) {
         if (!storageWritten[index] || storageTextures[index] == nullptr) continue;
         storageTextures[index]->MarkDirty();
+        if (index < storageKeys.size() && storageKeys[index] != 0) {
+            MarkDccUncompressed(context, storageKeys[index], storageTextures[index]->GuestBytes(), DccKeyCount(storageTextures[index]->Descriptor(), storageTextures[index]->GuestBytes()));
+        }
         static_cast<void>(DepthSurfaceStoreBack(context, *storageTextures[index]));
     }
 }
@@ -4696,6 +4699,9 @@ void ShaderResources::MarkGpuWrites(Recorder& recorder) {
     for (std::size_t index = 0; index < storageTextures.size(); ++index) {
         if (!storageWritten[index] || storageTextures[index] == nullptr) continue;
         storageTextures[index]->MarkDirty();
+        if (index < storageKeys.size() && storageKeys[index] != 0) {
+            MarkDccUncompressed(context, storageKeys[index], storageTextures[index]->GuestBytes(), DccKeyCount(storageTextures[index]->Descriptor(), storageTextures[index]->GuestBytes()));
+        }
         static_cast<void>(DepthSurfaceStoreBack(context, *storageTextures[index]));
     }
     // Written sub-ranges of buffers the GPU copied out of a host import go back into it by the GPU,
