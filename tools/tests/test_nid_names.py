@@ -109,6 +109,21 @@ class DatabaseCacheTests(unittest.TestCase):
             self.assertEqual(nid_names.load_db(cache), {nid: "sceExample"})
 
 class NidArgumentTests(unittest.TestCase):
+    def test_missing_name_values_fail_before_database_or_tree_access(self):
+        for arguments in (("--name",), ("--symbol", "--json"), ("--na", "--db", "unused.csv")):
+            with self.subTest(arguments=arguments), contextlib.redirect_stderr(io.StringIO()) as errors, \
+                    contextlib.redirect_stdout(io.StringIO()) as output, \
+                    patch.object(nid_names, "load_db") as database, \
+                    patch.object(nid_names, "collect_unknowns") as sources:
+                with self.assertRaises(SystemExit) as exited:
+                    nid_names.main(list(arguments))
+                self.assertEqual(exited.exception.code, 2)
+                self.assertIn("requires at least one symbol name", errors.getvalue())
+                self.assertEqual(output.getvalue(), "")
+                database.assert_not_called()
+                sources.assert_not_called()
+
+
     options = ["-h", "--help", "--db", "--nid", "--json"]
 
     def test_name_and_nid_modes_conflict_even_with_empty_filters(self):
