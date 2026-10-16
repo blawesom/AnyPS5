@@ -15,6 +15,8 @@ static constexpr std::uint32_t GEOM_FLAG_SOURCE_DOPPLER = 2;
 static constexpr std::uint32_t GEOM_FLAG_VOLUME_MATRIX = 4;
 static constexpr std::uint32_t GEOM_FLAG_A3D_ATTRIBUTE = 8;
 static constexpr std::uint32_t GEOM_FLAG_A3D_AMBISONICS = 16;
+static constexpr std::uint32_t GEOM_DEFAULT_FLAGS = GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_SOURCE_DOPPLER |
+    GEOM_FLAG_VOLUME_MATRIX | GEOM_FLAG_A3D_ATTRIBUTE;
 static constexpr std::uint32_t GEOM_SUPPORTED_FLAGS = GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_SOURCE_DOPPLER |
     GEOM_FLAG_VOLUME_MATRIX | GEOM_FLAG_A3D_ATTRIBUTE | GEOM_FLAG_A3D_AMBISONICS;
 
@@ -102,7 +104,6 @@ static float DopplerRatio(const Ngs2GeomListenerWork& listener, const Ngs2GeomSo
 
 static void ValidateGeomApply(const Ngs2GeomListenerWork& listener, const Ngs2GeomSourceParam& source, std::uint32_t flags) {
     if ((flags & ~GEOM_SUPPORTED_FLAGS) != 0) APS5_INVALID_ARG_EX;
-    if ((flags & GEOM_FLAG_A3D_AMBISONICS) != 0) throw std::runtime_error("NGS2: ambisonic geometry is not implemented");
     for (const auto& row : listener.matrix) {
         for (float value : row) if (!std::isfinite(value)) APS5_INVALID_ARG_EX;
     }
@@ -223,6 +224,7 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
 int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source,
     Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
     ValidateGeomApply(*listener, *source, flags);
+    if (flags == 0) flags = GEOM_DEFAULT_FLAGS;
 
     Ngs2GeomAttribute attribute{};
     attribute.pitch_ratio = 1.0f;
