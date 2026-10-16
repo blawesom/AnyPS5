@@ -1,3 +1,10 @@
+#if defined(__APPLE__)
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
+#include <locale.h>
+#include <xlocale.h>
+#endif
 #include "prx/libScePad/include/InputMapping.hpp"
 
 #include <algorithm>
@@ -170,11 +177,25 @@ int parseDeadzonePercent(std::string_view value) {
     return parsed;
 }
 
-double parseMouseSensitivity(std::string_view value) {
-    double parsed = 0.0;
+bool parseDouble(std::string_view value, double& parsed) {
+#if defined(__APPLE__)
+    if (value.empty() || std::isspace(static_cast<unsigned char>(value.front())) || value.front() == '+' || value.find_first_of("xX") != std::string_view::npos) return false;
+    static const locale_t classic = newlocale(LC_ALL_MASK, "C", nullptr);
+    const std::string text(value);
+    char* end = nullptr;
+    errno = 0;
+    parsed = strtod_l(text.c_str(), &end, classic);
+    return errno != ERANGE && end == text.c_str() + text.size();
+#else
     const auto end = value.data() + value.size();
     const auto result = std::from_chars(value.data(), end, parsed);
-    if (result.ec != std::errc{} || result.ptr != end || !(parsed > 0.0) || parsed > Pad::MaxMouseSensitivity) {
+    return result.ec == std::errc{} && result.ptr == end;
+#endif
+}
+
+double parseMouseSensitivity(std::string_view value) {
+    double parsed = 0.0;
+    if (!parseDouble(value, parsed) || !(parsed > 0.0) || parsed > Pad::MaxMouseSensitivity) {
         throw std::runtime_error("mouse sensitivity must be a number greater than 0 and at most 10");
     }
     return parsed;
@@ -188,9 +209,7 @@ std::string formatNumber(double value) {
 
 double parseNumber(std::string_view value, std::string_view name, double minimum, double maximum) {
     double parsed = 0.0;
-    const auto end = value.data() + value.size();
-    const auto result = std::from_chars(value.data(), end, parsed);
-    if (value.empty() || result.ec != std::errc{} || result.ptr != end || !std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
+    if (value.empty() || !parseDouble(value, parsed) || !std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
         throw std::runtime_error(std::string(name) + " must be a number from " + formatNumber(minimum) + " to " + formatNumber(maximum));
     }
     return parsed;

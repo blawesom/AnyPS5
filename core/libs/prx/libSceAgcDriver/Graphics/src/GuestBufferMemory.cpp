@@ -16,7 +16,9 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#if defined(__linux__)
 #include <linux/udmabuf.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -343,7 +345,21 @@ const char* createHostPointerImport(const Context& context, HostImport& entry, V
 }
 
 #ifndef _WIN32
+#if !defined(__linux__)
+struct udmabuf_create {
+    std::uint32_t memfd;
+    std::uint32_t flags;
+    std::uint64_t offset;
+    std::uint64_t size;
+};
+constexpr std::uint32_t UDMABUF_FLAGS_CLOEXEC = 1;
+constexpr unsigned long UDMABUF_CREATE = 0;
+#endif
+
 int udmabufDevice() {
+#if !defined(__linux__)
+    return -1;
+#endif
     static const int device = [] {
         const int result = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
         if (result < 0) {
@@ -2511,7 +2527,7 @@ ImportProbe ProbeImportWriteProtection(const Context& context) {
 
 ImportProbe ProbeDmaBufImportWriteProtection(const Context& context) {
     ImportProbe probe;
-#ifdef _WIN32
+#if !defined(__linux__)
     static_cast<void>(context);
     probe.failure = "the Linux write watch";
     return probe;

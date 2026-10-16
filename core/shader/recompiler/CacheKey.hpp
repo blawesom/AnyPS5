@@ -248,6 +248,7 @@ private:
         append(key, value.supportedCapabilities);
         append(key, value.supportedExtensions);
         append(key, value.fragmentShaderBarycentricEnabled);
+        append(key, value.fragmentBarycentricCoordinatesOnly);
         append(key, value.maxWorkgroupSize);
         append(key, value.maxWorkgroupInvocations);
         append(key, value.maxWorkgroupSharedMemoryBytes);

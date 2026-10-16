@@ -3,12 +3,17 @@
 
 #include "prx/libSceAgcDriver/Execution/include/QueueState.hpp"
 #include <cstdint>
+#include <span>
 
 namespace AgcDriver::DriverDetail {
 
 double TraceMs();
 
 std::uint64_t SkippedShader();
+
+void NoteRecentWork(char kind, std::uint32_t queue, std::span<const std::uint64_t> shaders, std::uint64_t target);
+
+void PrintRecentWork();
 
 void require(bool condition, const char* reason);
 

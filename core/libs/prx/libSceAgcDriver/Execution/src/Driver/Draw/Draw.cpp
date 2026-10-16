@@ -8,6 +8,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "Optimization/ResourceProgram.hpp"
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -179,6 +180,13 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     std::vector<DrawProgram> programs = decode->programs;
     for (const auto& patch : userPatches) programs[patch.program].userData[patch.index] = patch.value;
     if (const auto skipped = SkippedShader(); skipped != 0 && std::any_of(programs.begin(), programs.end(), [skipped](const DrawProgram& program) { return program.binary.codeAddress == skipped; })) return drawn();
+#if defined(__APPLE__)
+    {
+        std::array<std::uint64_t, 4> addresses{};
+        for (std::size_t i = 0; i < programs.size() && i < addresses.size(); ++i) addresses[i] = programs[i].binary.codeAddress;
+        NoteRecentWork('d', submission.queue, addresses, graphics.color.address);
+    }
+#endif
     const auto setMeshIndexBuffer = [&](const Pm4::DrawParameters& parameters) {
         if (!graphics.stages.mesh) return;
         auto& words = programs.front().userData;

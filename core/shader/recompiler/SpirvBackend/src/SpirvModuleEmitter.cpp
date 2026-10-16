@@ -112,7 +112,7 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
         const auto pointer = state.module.AllocateId();
         const auto value = state.module.AllocateId();
         const auto bits = state.module.AllocateId();
-        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeF32(state)), pointer, variable, ConstantU32(state, component + 1u));
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, BarycentricStorageClass(state, variable), TypeF32(state)), pointer, variable, ConstantU32(state, component + 1u));
         state.module.AddFunction(spv::OpLoad, TypeF32(state), value, pointer);
         state.module.AddFunction(spv::OpBitcast, TypeU32(state), bits, value);
         return bits;
@@ -135,7 +135,7 @@ std::uint32_t EmitAttributeValue(SpirvEmitterState& state, std::uint32_t attr, s
     const auto loadPerVertex = [&](std::uint32_t vertex) {
         const auto pointer = state.module.AllocateId();
         const auto value = state.module.AllocateId();
-        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, PerVertexStorageClass(state), TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
         state.module.AddFunction(spv::OpLoad, TypeF32(state), value, pointer);
         return value;
     };
@@ -158,7 +158,7 @@ std::uint32_t EmitAttributeValue(SpirvEmitterState& state, std::uint32_t attr, s
             const auto pointer = state.module.AllocateId();
             const auto weight = state.module.AllocateId();
             const auto product = state.module.AllocateId();
-            state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeF32(state)), pointer, barycentric, ConstantU32(state, vertex));
+            state.module.AddFunction(spv::OpAccessChain, TypePointer(state, BarycentricStorageClass(state, barycentric), TypeF32(state)), pointer, barycentric, ConstantU32(state, vertex));
             state.module.AddFunction(spv::OpLoad, TypeF32(state), weight, pointer);
             state.module.AddFunction(spv::OpFMul, TypeF32(state), product, loadPerVertex(vertex), weight);
             if (vertex == 0u) {
@@ -196,7 +196,7 @@ std::uint32_t EmitInterpolationParameterValue(SpirvEmitterState& state, std::uin
     const auto loadVertex = [&](std::uint32_t vertex) {
         const auto pointer = state.module.AllocateId();
         const auto value = state.module.AllocateId();
-        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, PerVertexStorageClass(state), TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
         state.module.AddFunction(spv::OpLoad, TypeF32(state), value, pointer);
         return value;
     };
@@ -225,7 +225,7 @@ std::uint32_t EmitInterpolationParameterF16Value(SpirvEmitterState& state, std::
         const auto pointer = state.module.AllocateId();
         const auto value = state.module.AllocateId();
         auto bits = state.module.AllocateId();
-        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, PerVertexStorageClass(state), TypeF32(state)), pointer, input->variableId, ConstantU32(state, vertex), ConstantU32(state, chan & 3u));
         state.module.AddFunction(spv::OpLoad, TypeF32(state), value, pointer);
         state.module.AddFunction(spv::OpBitcast, TypeU32(state), bits, value);
         if (high) {
@@ -1189,6 +1189,7 @@ void EmitProgram(SpirvEmitterState& state) {
     if (OrderedPixelShader(state)) {
         state.module.AddFunction(spv::OpBeginInvocationInterlockEXT);
     }
+    EmitPerVertexReconstruction(state);
     EmitMemoryOffsets(state);
     if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadMasked()) {
         const auto& pixel = *state.inputInfo.pixel;
@@ -1434,6 +1435,92 @@ std::uint32_t EmitGetUserData(SpirvEmitterState& state, ScalarReg reg) {
 
 std::uint32_t EmitGetBuiltin(SpirvValueEmitContext& ctx, const IrValue* kind, const IrValue* index) {
     return EmitBuiltinU32(ctx.state, static_cast<StageInputKind>(kind->ImmediateU32()), index->ImmediateU32());
+}
+
+std::uint32_t PerVertexStorageClass(const SpirvEmitterState& state) {
+    return state.program.Metadata().perVertexReconstruction ? spv::StorageClassPrivate : spv::StorageClassInput;
+}
+
+std::uint32_t BarycentricStorageClass(const SpirvEmitterState& state, std::uint32_t variable) {
+    return variable != 0u && variable == state.perVertexDerivedBarycentric ? spv::StorageClassPrivate : spv::StorageClassInput;
+}
+
+void EmitPerVertexReconstruction(SpirvEmitterState& state) {
+    if (state.perVertexPlanes.empty() && state.perVertexDerivedBarycentric == 0u) return;
+    if (state.perVertexPlaneBarycentric == 0u) FailEmit("per-vertex reconstruction lacks its barycentric input");
+    const auto f32 = TypeF32(state);
+    const auto vec3 = TypeF32Vector(state, 3u);
+    const auto vec4 = TypeF32Vector(state, 4u);
+    const auto op = [&](spv::Op opcode, std::uint32_t type, auto... operands) {
+        const auto id = state.module.AllocateId();
+        state.module.AddFunction(opcode, type, id, operands...);
+        return id;
+    };
+    const auto weights = op(spv::OpLoad, vec3, state.perVertexPlaneBarycentric);
+    const auto weightsX = op(spv::OpDPdx, vec3, weights);
+    const auto weightsY = op(spv::OpDPdy, vec3, weights);
+    const auto component = [&](std::uint32_t vector, std::uint32_t index) { return op(spv::OpCompositeExtract, f32, vector, index); };
+    const auto cross = [&](std::uint32_t left, std::uint32_t right) {
+        std::array<std::uint32_t, 3> result{};
+        for (std::uint32_t index = 0; index < 3u; ++index) {
+            const auto first = (index + 1u) % 3u;
+            const auto second = (index + 2u) % 3u;
+            const auto a = op(spv::OpFMul, f32, component(left, first), component(right, second));
+            const auto b = op(spv::OpFMul, f32, component(left, second), component(right, first));
+            result[index] = op(spv::OpFSub, f32, a, b);
+        }
+        return result;
+    };
+    const auto plane = cross(weightsX, weightsY);
+    const auto stepX = cross(weightsY, weights);
+    const auto stepY = cross(weights, weightsX);
+    auto determinant = op(spv::OpFMul, f32, component(weights, 0u), plane[0]);
+    for (std::uint32_t index = 1; index < 3u; ++index) determinant = op(spv::OpFAdd, f32, determinant, op(spv::OpFMul, f32, component(weights, index), plane[index]));
+    const auto magnitude = state.module.AllocateId();
+    state.module.AddFunction(spv::OpExtInst, f32, magnitude, GlslStd450(state), static_cast<std::uint32_t>(GLSLstd450FAbs), determinant);
+    const auto usable = op(spv::OpFOrdGreaterThan, TypeBool(state), magnitude, ConstantF32(state, 0x0da24260u));
+    const auto inverse = op(spv::OpFDiv, f32, ConstantF32(state, 0x3f800000u), Select(state, f32, usable, determinant, ConstantF32(state, 0x3f800000u)));
+    std::array<std::array<std::uint32_t, 3>, 3> coefficients{};
+    for (std::uint32_t corner = 0; corner < 3u; ++corner) {
+        coefficients[corner][0] = Select(state, f32, usable, op(spv::OpFMul, f32, plane[corner], inverse), ConstantF32(state, 0x3f800000u));
+        coefficients[corner][1] = Select(state, f32, usable, op(spv::OpFMul, f32, stepX[corner], inverse), ConstantF32(state, 0u));
+        coefficients[corner][2] = Select(state, f32, usable, op(spv::OpFMul, f32, stepY[corner], inverse), ConstantF32(state, 0u));
+    }
+    for (const auto& [corners, input] : state.perVertexPlanes) {
+        const auto value = op(spv::OpLoad, vec4, input);
+        const auto valueX = op(spv::OpDPdx, vec4, value);
+        const auto valueY = op(spv::OpDPdy, vec4, value);
+        for (std::uint32_t corner = 0; corner < 3u; ++corner) {
+            auto vertex = op(spv::OpVectorTimesScalar, vec4, value, coefficients[corner][0]);
+            vertex = op(spv::OpFAdd, vec4, vertex, op(spv::OpVectorTimesScalar, vec4, valueX, coefficients[corner][1]));
+            vertex = op(spv::OpFAdd, vec4, vertex, op(spv::OpVectorTimesScalar, vec4, valueY, coefficients[corner][2]));
+            const auto pointer = op(spv::OpAccessChain, TypePointer(state, spv::StorageClassPrivate, vec4), corners, ConstantU32(state, corner));
+            state.module.AddFunction(spv::OpStore, pointer, vertex);
+        }
+    }
+    if (state.perVertexDerivedBarycentric == 0u) return;
+    if (state.perVertexFragCoord == 0u) FailEmit("derived linear barycentrics lack the fragment position");
+    const auto position = op(spv::OpLoad, vec4, state.perVertexFragCoord);
+    const auto depth = op(spv::OpFDiv, f32, ConstantF32(state, 0x3f800000u), component(position, 3u));
+    const auto depthX = op(spv::OpDPdx, f32, depth);
+    const auto depthY = op(spv::OpDPdy, f32, depth);
+    std::array<std::uint32_t, 3> scaled{};
+    for (std::uint32_t corner = 0; corner < 3u; ++corner) {
+        auto vertexDepth = op(spv::OpFMul, f32, depth, coefficients[corner][0]);
+        vertexDepth = op(spv::OpFAdd, f32, vertexDepth, op(spv::OpFMul, f32, depthX, coefficients[corner][1]));
+        vertexDepth = op(spv::OpFAdd, f32, vertexDepth, op(spv::OpFMul, f32, depthY, coefficients[corner][2]));
+        scaled[corner] = op(spv::OpFMul, f32, component(weights, corner), vertexDepth);
+    }
+    const auto total = op(spv::OpFAdd, f32, op(spv::OpFAdd, f32, scaled[0], scaled[1]), scaled[2]);
+    const auto totalMagnitude = state.module.AllocateId();
+    state.module.AddFunction(spv::OpExtInst, f32, totalMagnitude, GlslStd450(state), static_cast<std::uint32_t>(GLSLstd450FAbs), total);
+    const auto normalizable = op(spv::OpFOrdGreaterThan, TypeBool(state), totalMagnitude, ConstantF32(state, 0x0da24260u));
+    const auto scale = op(spv::OpFDiv, f32, ConstantF32(state, 0x3f800000u), Select(state, f32, normalizable, total, ConstantF32(state, 0x3f800000u)));
+    std::array<std::uint32_t, 3> linear{};
+    for (std::uint32_t corner = 0; corner < 3u; ++corner) {
+        linear[corner] = Select(state, f32, normalizable, op(spv::OpFMul, f32, scaled[corner], scale), component(weights, corner));
+    }
+    state.module.AddFunction(spv::OpStore, state.perVertexDerivedBarycentric, op(spv::OpCompositeConstruct, vec3, linear[0], linear[1], linear[2]));
 }
 
 std::uint32_t EmitGetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {

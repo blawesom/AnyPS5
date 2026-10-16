@@ -1418,6 +1418,16 @@ bool HtileFillCovers(std::uint64_t htile, VkExtent2D extent, std::uint64_t addre
     return address + bytes - htile >= HtileMetadataBytes(extent);
 }
 
+#if defined(__APPLE__)
+bool FillCoversDepthMetadata(std::uint64_t address, std::size_t bytes) {
+    std::lock_guard lock(surfacesMutex());
+    return std::ranges::any_of(surfaces(), [&](const auto& surface) {
+        const auto& target = surface->target;
+        return surface->active->load(std::memory_order_acquire) && target.samples == 1u && target.htileAddress == address && HtileMetadataBytes(target.extent) == bytes;
+    });
+}
+#endif
+
 void NoteDepthMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
     std::lock_guard lock(surfacesMutex());
     forgetHtileReads(address, bytes);

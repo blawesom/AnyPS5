@@ -6,12 +6,14 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <algorithm>
+#include <array>
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include <bit>
 #include <cstdlib>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <cstring>
 
 namespace AgcDriver::DriverDetail {
@@ -350,12 +352,23 @@ void Driver::storeBufferFill(std::uint32_t queueId, std::uint64_t base, std::siz
         if (Graphics::StorageTexture::FlushPending(base, bytes, nullptr, "buffer fill", Graphics::PublishScope::PartialUnits)) ++flushed;
     }
     phase(FillFlush);
-    const bool stored = cleared || absorbed || localDevice->FillBuffer(base, bytes, pattern);
+#if defined(__APPLE__)
+    const bool metadataOnCpu = !cleared && !absorbed && noteMetadata && uniform && Graphics::FillCoversDepthMetadata(base, bytes) && localDevice->GpuIdleOver(base, bytes);
+    if (metadataOnCpu) {
+        std::array<std::uint32_t, 256> block{};
+        block.fill(pattern[0]);
+        const auto chunk = std::as_bytes(std::span(block));
+        for (std::size_t done = 0; done < bytes; done += chunk.size()) GuestMemory::Write(base + done, chunk.first(std::min(chunk.size(), bytes - done)), 16);
+    }
+#else
+    constexpr bool metadataOnCpu = false;
+#endif
+    const bool stored = cleared || absorbed || metadataOnCpu || localDevice->FillBuffer(base, bytes, pattern);
     phase(FillDevice);
-    if (stored && !cleared && !absorbed) {
+    if (stored && !cleared && !absorbed && !metadataOnCpu) {
         if (const auto filled = KeysFillMemo(pattern, uniformKeysFill, memoryValueFill)) Graphics::NoteKeysFillOnGpu(base, bytes, *filled);
     }
-    if (profile && stored && !cleared && !absorbed) {
+    if (profile && stored && !cleared && !absorbed && !metadataOnCpu) {
         ++(uniform ? uniformFills : patternFills);
         (uniform ? uniformBytes : patternBytes) += bytes;
         if (!uniform) chainCopies += static_cast<std::uint64_t>(std::bit_width((bytes / 16) - 1));

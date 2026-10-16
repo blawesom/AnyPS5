@@ -62,15 +62,9 @@ public:
 
         const auto invocation = load(intType, invocationId);
         const auto first = result(spv::OpIEqual, boolType, invocation, intConstant(0));
-        const auto writeLevels = builder.AllocateId();
-        const auto afterLevels = builder.AllocateId();
-        emit(spv::OpSelectionMerge, afterLevels, spv::SelectionControlMaskNone);
-        emit(spv::OpBranchConditional, first, writeLevels, afterLevels);
-        emit(spv::OpLabel, writeLevels);
-        for (std::uint32_t i = 0; i < 4; i++) store(access(ptrOutputFloat, tessOuter, intConstant(i)), floatOne);
-        for (std::uint32_t i = 0; i < 2; i++) store(access(ptrOutputFloat, tessInner, intConstant(i)), floatOne);
-        emit(spv::OpBranch, afterLevels);
-        emit(spv::OpLabel, afterLevels);
+#if !defined(__APPLE__)
+        writeLevels(first, floatOne);
+#endif
 
         std::array<std::uint32_t, 3> positions {};
         for (std::uint32_t i = 0; i < positions.size(); i++) {
@@ -107,7 +101,22 @@ public:
         }
         const auto position3 = interpolate(positions[0], positions[1], positions[2], barycentric);
         valid = result(spv::OpLogicalAnd, boolType, valid, isFinite(position3));
-        rejectInvalidRectangle(valid);
+#if defined(__APPLE__)
+        const auto vec4BoolType = type(spv::OpTypeVector, boolType, 4u);
+        auto degenerate = result(spv::OpIEqual, boolType, cornerCount, uintConstant(3));
+        for (std::uint32_t i = 1; i < 3; ++i) degenerate = result(spv::OpLogicalAnd, boolType, degenerate, result(spv::OpAll, boolType, result(spv::OpFOrdEqual, vec4BoolType, positions[0], positions[i])));
+        valid = result(spv::OpLogicalOr, boolType, valid, degenerate);
+        std::array<std::uint32_t, 5> diagnostics {};
+        diagnostics[0] = cornerCount;
+        for (std::uint32_t i = 0; i < 2; ++i) {
+            diagnostics[1 + 2 * i] = result(spv::OpBitcast, uintType, result(spv::OpCompositeExtract, floatType, positions[i], 0u));
+            diagnostics[2 + 2 * i] = result(spv::OpBitcast, uintType, result(spv::OpCompositeExtract, floatType, positions[i], 1u));
+        }
+        rejectInvalidRectangle(valid, diagnostics);
+        writeLevels(first, result(spv::OpSelect, floatType, valid, floatOne, constant(floatType, 0)));
+#else
+        rejectInvalidRectangle(valid, {});
+#endif
         auto vertexIndex = result(spv::OpSelect, intType, edgeVertex[2], intConstant(2), intConstant(0));
         vertexIndex = result(spv::OpSelect, intType, edgeVertex[1], intConstant(1), vertexIndex);
         const auto fourth = result(spv::OpIEqual, boolType, invocation, intConstant(3));
@@ -184,7 +193,7 @@ private:
         return access(pointer(spv::StorageClassStorageBuffer, uintType), fault, uintConstant(0), uintConstant(index));
     }
 
-    void rejectInvalidRectangle(std::uint32_t valid) {
+    void rejectInvalidRectangle(std::uint32_t valid, const std::array<std::uint32_t, 5>& diagnostics) {
         const auto failed = builder.AllocateId();
         const auto next = builder.AllocateId();
         emit(spv::OpSelectionMerge, next, spv::SelectionControlMaskNone);
@@ -201,12 +210,28 @@ private:
         emit(spv::OpBranchConditional, won, write, done);
         emit(spv::OpLabel, write);
         store(faultWord(1), uintConstant(static_cast<std::uint32_t>(BdaAbi::FaultReason::InvalidRectangle)));
-        for (std::uint32_t i = 2; i < 8; ++i) store(faultWord(i), uintConstant(0));
+        for (std::uint32_t i = 2; i < 8; ++i) store(faultWord(i), i < 7 && diagnostics[i - 2] != 0 ? diagnostics[i - 2] : uintConstant(0));
         emit(spv::OpAtomicStore, state, scope, uintConstant(spv::MemorySemanticsReleaseMask | spv::MemorySemanticsUniformMemoryMask), uintConstant(static_cast<std::uint32_t>(BdaAbi::FaultState::Ready)));
         emit(spv::OpBranch, done);
         emit(spv::OpLabel, done);
+#if defined(__APPLE__)
+        emit(spv::OpBranch, next);
+#else
         emit(spv::OpReturn);
+#endif
         emit(spv::OpLabel, next);
+    }
+
+    void writeLevels(std::uint32_t first, std::uint32_t level) {
+        const auto write = builder.AllocateId();
+        const auto after = builder.AllocateId();
+        emit(spv::OpSelectionMerge, after, spv::SelectionControlMaskNone);
+        emit(spv::OpBranchConditional, first, write, after);
+        emit(spv::OpLabel, write);
+        for (std::uint32_t i = 0; i < 4; i++) store(access(ptrOutputFloat, tessOuter, intConstant(i)), level);
+        for (std::uint32_t i = 0; i < 2; i++) store(access(ptrOutputFloat, tessInner, intConstant(i)), level);
+        emit(spv::OpBranch, after);
+        emit(spv::OpLabel, after);
     }
 
     template <typename... TArgs>

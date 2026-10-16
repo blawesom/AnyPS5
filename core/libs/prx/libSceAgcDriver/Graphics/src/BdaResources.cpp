@@ -247,6 +247,14 @@ void BdaResources::CheckFault() const {
         return;
     }
     Require(report.state == ShaderRecompiler::BdaAbi::FaultState::Ready && report.reserved == 0, "incomplete or invalid BDA fault record");
+#if defined(__APPLE__)
+    if (report.reason == ShaderRecompiler::BdaAbi::FaultReason::InvalidRectangle) {
+        static std::atomic<std::uint32_t> reported{0};
+        if (reported.fetch_add(1, std::memory_order_relaxed) < 4) std::fprintf(stderr, "[gpu] rect-list draw skipped a rectangle without finite nondegenerate axis-aligned positions of equal positive W (corners %u, v0 %g %g, v1 %g %g)\n", static_cast<std::uint32_t>(report.address), std::bit_cast<float>(static_cast<std::uint32_t>(report.address >> 32u)), std::bit_cast<float>(report.bytes), std::bit_cast<float>(report.stage), std::bit_cast<float>(report.instruction));
+        std::memset(fault->Bytes().data(), 0, fault->Bytes().size());
+        return;
+    }
+#endif
     Require(report.reason != ShaderRecompiler::BdaAbi::FaultReason::InvalidRectangle, "rect-list requires finite nondegenerate axis-aligned positions with equal positive W");
     if (report.reason == ShaderRecompiler::BdaAbi::FaultReason::LoopLimit) {
         // APS5_LOOP_GUARD: the shader left a loop that ran past the guard; the dispatch result is kept.

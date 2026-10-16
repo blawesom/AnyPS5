@@ -291,6 +291,7 @@ struct VulkanDevice::State {
     bool meshShader = false;
     bool fragmentShaderBarycentric = false;
     bool shaderTerminateInvocation = false;
+    bool fragmentBarycentricCoordinatesOnly = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool storageImageMultisample = false;
@@ -407,6 +408,8 @@ struct VulkanDevice::State {
     VkFormat surfaceFormat = VK_FORMAT_B8G8R8A8_UNORM;
     VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     bool swapchainColorSpaces = false;
+    bool portabilityEnumeration = false;
+    bool portabilitySubset = false;
     bool hdrMetadata = false;
     std::vector<VkSurfaceFormatKHR> surfaceFormats;
     std::uint64_t surfaceDisplayGeneration = 0;
@@ -966,6 +969,21 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     APS5_LOG_OUT("VulkanDevice constructor window=%p", static_cast<const void*>(window));
 #ifdef _WIN32
     state->library = SDL_LoadObject("vulkan-1.dll");
+#elif defined(__APPLE__)
+    std::string attempted;
+    if (const char* overridden = std::getenv("ANYPS5_VULKAN_LIBRARY"); overridden != nullptr && *overridden != '\0') {
+        state->library = SDL_LoadObject(overridden);
+        attempted = std::string(overridden) + ": " + SDL_GetError();
+    } else {
+        for (const char* candidate : {"libvulkan.1.dylib", "libvulkan.dylib", "vulkan.framework/vulkan", "libMoltenVK.dylib", "MoltenVK.framework/MoltenVK"}) {
+            state->library = SDL_LoadObject(candidate);
+            if (state->library != nullptr) break;
+            attempted += std::string(attempted.empty() ? "" : "; ") + candidate + ": " + SDL_GetError();
+        }
+    }
+    if (state->library == nullptr) {
+        throw std::runtime_error("Vulkan loader: no Vulkan library found (install the Vulkan SDK or set ANYPS5_VULKAN_LIBRARY): " + attempted);
+    }
 #else
     state->library = SDL_LoadObject("libvulkan.so.1");
 #endif
@@ -987,6 +1005,17 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     VkInstanceCreateInfo create{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     create.pApplicationInfo = &application;
     std::vector<const char*> instanceExtensions;
+    {
+        std::uint32_t availableCount = 0;
+        const auto enumerateExtensions = state->InstanceFunction<PFN_vkEnumerateInstanceExtensionProperties>("vkEnumerateInstanceExtensionProperties");
+        check(enumerateExtensions(nullptr, &availableCount, nullptr), "vkEnumerateInstanceExtensionProperties");
+        std::vector<VkExtensionProperties> available(availableCount);
+        check(enumerateExtensions(nullptr, &availableCount, available.data()), "vkEnumerateInstanceExtensionProperties");
+        if (std::any_of(available.begin(), available.end(), [](const auto& item) { return std::strcmp(item.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0; })) {
+            state->portabilityEnumeration = true;
+            create.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        }
+    }
     if (window != nullptr) {
         APS5_LOG_OUT("Presentation window context=%p extent=%ux%u extensions=%zu", window->context, window->width, window->height, window->extensions.size());
         require(window->context && window->createSurface && window->getDrawableSize && window->width && window->height, "invalid window descriptor");
@@ -1006,9 +1035,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
             instanceExtensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
             state->swapchainColorSpaces = true;
         }
-        create.enabledExtensionCount = static_cast<std::uint32_t>(instanceExtensions.size());
-        create.ppEnabledExtensionNames = instanceExtensions.data();
     }
+    if (state->portabilityEnumeration) instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    create.enabledExtensionCount = static_cast<std::uint32_t>(instanceExtensions.size());
+    create.ppEnabledExtensionNames = instanceExtensions.empty() ? nullptr : instanceExtensions.data();
     check(state->InstanceFunction<PFN_vkCreateInstance>("vkCreateInstance")(&create, nullptr, &state->instance), "vkCreateInstance");
     APS5_LOG_OUT("Vulkan instance created instance=%p", reinterpret_cast<void*>(state->instance));
     if (window != nullptr) {
@@ -1158,7 +1188,20 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
             VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
             VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
             state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
-            state->fragmentShaderBarycentric = FragmentShaderBarycentricUsable(driver.driverID, state->fragmentShaderBarycentric);
+            const bool reported = state->fragmentShaderBarycentric;
+            state->fragmentShaderBarycentric = FragmentShaderBarycentricUsable(driver.driverID, reported);
+#if defined(__APPLE__)
+            const char* allowed = std::getenv("ANYPS5_MOLTENVK_BARYCENTRIC");
+            if (reported && driver.driverID == VK_DRIVER_ID_MOLTENVK && !state->fragmentShaderBarycentric) {
+                state->fragmentBarycentricCoordinatesOnly = true;
+                std::fprintf(stderr, "[gpu] MoltenVK: per-vertex pixel inputs are reconstructed from barycentric coordinates and derivatives, as Metal has neither geometry shaders nor PerVertexKHR\n");
+            }
+            if (reported && driver.driverID == VK_DRIVER_ID_MOLTENVK && allowed != nullptr && std::strcmp(allowed, "1") == 0) {
+                state->fragmentBarycentricCoordinatesOnly = false;
+                state->fragmentShaderBarycentric = true;
+                std::fprintf(stderr, "[gpu] MoltenVK: VK_KHR_fragment_shader_barycentric forced on by ANYPS5_MOLTENVK_BARYCENTRIC=1; per-vertex inputs fail to translate to MSL\n");
+            }
+#endif
         }
     }
     VkPhysicalDeviceShaderTerminateInvocationFeaturesKHR terminateFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES_KHR};
@@ -1204,11 +1247,16 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     }
     std::vector<const char*> deviceExtensions;
     if (window != nullptr) deviceExtensions.assign(presentationExtensions.begin(), presentationExtensions.end());
+    if (hasExtension("VK_KHR_portability_subset")) {
+        deviceExtensions.push_back("VK_KHR_portability_subset");
+        state->portabilitySubset = true;
+        APS5_LOG_OUT("Portability subset device: %s enabled", "VK_KHR_portability_subset");
+    }
     if (window != nullptr && hasExtension(VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
         deviceExtensions.push_back(VK_EXT_HDR_METADATA_EXTENSION_NAME);
         state->hdrMetadata = true;
     }
-    if (state->fragmentShaderBarycentric) {
+    if (state->fragmentShaderBarycentric || state->fragmentBarycentricCoordinatesOnly) {
         deviceExtensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
         state->capabilities.push_back(spv::CapabilityFragmentBarycentricKHR);
         state->spirvExtensions.push_back("SPV_KHR_fragment_shader_barycentric");
@@ -1697,7 +1745,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         deviceInfo.pNext = &nonSeamlessCubeFeatures;
     }
     byteFeatures.pNext = const_cast<void*>(deviceInfo.pNext);
-    if (state->fragmentShaderBarycentric) {
+    if (state->fragmentShaderBarycentric || state->fragmentBarycentricCoordinatesOnly) {
         barycentricFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &barycentricFeatures;
     }
@@ -2158,6 +2206,14 @@ bool VulkanDevice::StoresPendingOver(std::uint64_t address, std::size_t bytes) c
     if (Graphics::StorageTexture::AnyPendingOverlaps(range) || Graphics::AnyShadowedOverlaps(range) || state->CopiedWriterOverlaps(address, bytes)) return true;
     return state->recorder && (state->recorder->PendingWriteOverlaps(address, bytes) || state->recorder->PendingLabelIn(address, bytes));
 }
+
+#if defined(__APPLE__)
+bool VulkanDevice::GpuIdleOver(std::uint64_t address, std::size_t bytes) const {
+    if (StoresPendingOver(address, bytes)) return false;
+    if (state->recorder && state->recorder->PendingReadOverlaps(address, bytes)) return false;
+    return Graphics::Recorder::PendingCompletionLabels() == 0 || !state->recorder || !state->recorder->CompletionLabelIn(address, bytes);
+}
+#endif
 
 int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::byte> bytes, std::uint64_t stamp, std::uint32_t queue, bool reapFirst) {
     static const bool storeAtLabel = Graphics::StorageTexture::StoreAtLabelRequested(std::getenv("APS5_STORE_AT_LABEL"));
@@ -3484,6 +3540,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     const auto& limits = state->properties.limits;
     ShaderRecompiler::SpirvTarget target{VK_API_VERSION_1_1, state->meshShader ? 0x00010400u : 0x00010300u, state->subgroup.subgroupSize, ShaderRecompiler::BdaAbi::Version, state->capabilities, state->spirvExtensions, false, {limits.maxComputeWorkGroupSize[0], limits.maxComputeWorkGroupSize[1], limits.maxComputeWorkGroupSize[2]}, limits.maxComputeWorkGroupInvocations, limits.maxComputeSharedMemorySize, {}, {}};
     target.fragmentShaderBarycentricEnabled = state->fragmentShaderBarycentric;
+    target.fragmentBarycentricCoordinatesOnly = state->fragmentBarycentricCoordinatesOnly;
     target.nonConstantImageOffsets = state->maintenance8;
     target.narrowSubgroupClock = state->narrowSubgroupClock;
     target.float64DenormPreserve = state->float64DenormPreserve;
@@ -3559,7 +3616,7 @@ Graphics::Context VulkanDevice::buildContext() const {
         state->depthRangeUnrestricted,
         true,
         state->subgroup,
-        state->fragmentShaderBarycentric,
+        state->fragmentShaderBarycentric || state->fragmentBarycentricCoordinatesOnly,
         state->samplerAnisotropy,
         state->textureCompressionBC,
         state->detiler.get(),

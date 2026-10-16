@@ -6,6 +6,7 @@
 #include "Decoder/Png.hpp"
 #include "SDL_vulkan.h"
 #include <cstdio>
+#include <cstdlib>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,16 @@ void DisplayWindow::create(std::uint32_t sourceWidth, std::uint32_t sourceHeight
     require(initialSize.width >= DisplayWindowMinimumWidth && initialSize.height >= DisplayWindowMinimumHeight, "initial window extent is smaller than the minimum");
     const auto title = GetAppTitle_nid_postfix();
     AgcDriverLockVulkanLoader_nid_postfix();
+#if defined(__APPLE__)
+    static const bool loaderLoaded = [] {
+        const char* overridden = std::getenv("ANYPS5_VULKAN_LIBRARY");
+        return overridden == nullptr || *overridden == '\0' || SDL_getenv("SDL_VULKAN_LIBRARY") != nullptr || SDL_Vulkan_LoadLibrary(overridden) == 0;
+    }();
+    if (!loaderLoaded) {
+        AgcDriverUnlockVulkanLoader_nid_postfix();
+        require(false, SDL_GetError());
+    }
+#endif
     window = SDL_CreateWindow(title.value, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, static_cast<int>(initialSize.width), static_cast<int>(initialSize.height), SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     AgcDriverUnlockVulkanLoader_nid_postfix();
     require(window != nullptr, SDL_GetError());

@@ -20,6 +20,7 @@
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libSceVideoOut/include/VideoOutDriver.hpp"
+#include "prx/libc/include/MainThread.hpp"
 #if APS5_ENABLE_TIMING_LOG
 #include "prx/libSceVideoOut/include/FrameTimingLog.hpp"
 #endif
@@ -276,21 +277,26 @@ VideoOutDriver::VideoOutDriver() {
 #ifdef __linux__
     SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland,x11");
 #endif
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
+    const bool initializeOnPresenter = LibcMainThreadServing_nid_postfix();
+    if (!initializeOnPresenter && SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
         throw std::runtime_error(std::string("SDL_InitSubSystem(VIDEO | GAMECONTROLLER) failed: ") + SDL_GetError());
     }
     try {
         AgcDriverWaitIdle_nid_postfix();
         std::promise<void> started;
         auto attached = started.get_future();
-        presentThread = std::jthread([this, &started](std::stop_token token) {
+        presentThread.Start([this, &started, initializeOnPresenter](std::stop_token token) {
             try {
+                if (initializeOnPresenter && SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
+                    throw std::runtime_error(std::string("SDL_InitSubSystem(VIDEO | GAMECONTROLLER) failed: ") + SDL_GetError());
+                }
                 AgcDriverRaiseWorkerThreadPriority_nid_postfix("presenter");
             } catch (...) {
                 started.set_exception(std::current_exception());
                 return;
             }
             presentLoop(token, started);
+            if (initializeOnPresenter) SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
         });
         attached.get();
         vblankThread = std::jthread([this](std::stop_token token) { vblankLoop(token); });
@@ -301,12 +307,12 @@ VideoOutDriver::VideoOutDriver() {
             flipQueue->changed.NotifyAll();
             vblankThread.join();
         }
-        if (presentThread.joinable()) {
-            presentThread.request_stop();
+        if (presentThread.Joinable()) {
+            presentThread.RequestStop();
             flipQueue->changed.NotifyAll();
-            presentThread.join();
+            presentThread.Join();
         }
-        SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
+        if (!initializeOnPresenter) SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
         throw;
     }
 }
@@ -316,7 +322,7 @@ VideoOutDriver::~VideoOutDriver() {
 }
 
 void VideoOutDriver::Shutdown() {
-    require(std::this_thread::get_id() != presentThread.get_id(), "presentation thread cannot stop itself");
+    require(std::this_thread::get_id() != presentThread.Id(), "presentation thread cannot stop itself");
     std::lock_guard shutdownLock(shutdownMutex);
     if (stopped) return;
     LibcRequestShutdown_nid_postfix();
@@ -324,10 +330,11 @@ void VideoOutDriver::Shutdown() {
         std::lock_guard queueLock(flipQueue->mutex);
         flipQueue->stopping = true;
     }
-    presentThread.request_stop();
+    const bool presenterOwnsSdl = presentThread.OnMainThread();
+    presentThread.RequestStop();
     vblankThread.request_stop();
     flipQueue->changed.NotifyAll();
-    presentThread.join();
+    presentThread.Join();
     vblankThread.join();
     {
         std::lock_guard lock(mutex);
@@ -335,7 +342,7 @@ void VideoOutDriver::Shutdown() {
             if (outputs[handle]) close(handle);
         }
     }
-    SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
+    if (!presenterOwnsSdl) SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
     stopped = true;
     std::lock_guard lock(flipQueue->mutex);
     if (flipQueue->failure) std::rethrow_exception(flipQueue->failure);

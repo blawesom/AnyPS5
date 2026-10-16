@@ -191,6 +191,7 @@ void DefineInputs(SpirvEmitterState& state) {
     }
     const bool pixelStage = state.program.Resources().stage == IrShaderStage::Pixel;
     const bool emulated = pixelStage && state.program.Metadata().barycentricEmulation;
+    const bool reconstructed = pixelStage && state.program.Metadata().perVertexReconstruction;
     BarycentricEmulationLayout emulation;
     if (emulated) {
         const auto parameters = DescribeFragmentParameters(state.program, state.inputInfo);
@@ -199,6 +200,11 @@ void DefineInputs(SpirvEmitterState& state) {
         };
         emulation = LayoutBarycentricEmulation(parameters, {true, reads(StageInputKind::BaryCoordSmooth), reads(StageInputKind::BaryCoordNoPerspective)});
     }
+    const auto readsInput = [&](StageInputKind kind) {
+        return std::any_of(state.inputs.begin(), state.inputs.end(), [&](const SpirvInputBinding& input) { return input.kind == kind; });
+    };
+    const auto reconstructionKind = reconstructed && readsInput(StageInputKind::BaryCoordSmooth) ? StageInputKind::BaryCoordSmooth : StageInputKind::BaryCoordNoPerspective;
+    const bool derivedLinear = reconstructionKind == StageInputKind::BaryCoordSmooth && readsInput(StageInputKind::BaryCoordNoPerspective);
     for (auto& input : state.inputs) {
         if (pixelStage && input.kind == StageInputKind::Parameter) {
             const auto location = PixelParameterLocation(state, input.location);
@@ -212,6 +218,29 @@ void DefineInputs(SpirvEmitterState& state) {
                 input.variableId = shared->variableId;
                 continue;
             }
+        }
+        if (reconstructed && input.kind == StageInputKind::Parameter && input.perVertex) {
+            const auto vec4 = TypeF32Vector(state, 4u);
+            const auto array = state.module.Type(spv::OpTypeArray, vec4, ConstantU32(state, 3u));
+            input.variableId = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, array), spv::StorageClassPrivate);
+            state.module.AddName(input.variableId, input.debugName.c_str());
+            if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(input.variableId);
+            const auto plane = DefineInterfaceVariable(state, vec4, spv::StorageClassInput, "perVertexPlane");
+            state.module.AddAnnotation(spv::OpDecorate, plane, spv::DecorationLocation, PixelParameterLocation(state, input.location));
+            if (PixelParameterIsFlat(state, input.location)) {
+                state.module.AddAnnotation(spv::OpDecorate, plane, spv::DecorationFlat);
+            } else if (reconstructionKind == StageInputKind::BaryCoordNoPerspective) {
+                state.module.AddAnnotation(spv::OpDecorate, plane, spv::DecorationNoPerspective);
+            }
+            state.perVertexPlanes.emplace_back(input.variableId, plane);
+            continue;
+        }
+        if (derivedLinear && input.kind == StageInputKind::BaryCoordNoPerspective) {
+            input.variableId = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeF32Vector(state, 3u)), spv::StorageClassPrivate);
+            state.module.AddName(input.variableId, input.debugName.c_str());
+            if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(input.variableId);
+            state.perVertexDerivedBarycentric = input.variableId;
+            continue;
         }
         std::uint32_t type = TypeU32(state);
         switch (input.kind) {
@@ -288,6 +317,21 @@ void DefineInputs(SpirvEmitterState& state) {
             state.module.AddAnnotation(spv::OpDecorate, input.variableId, spv::DecorationLocation, linear ? emulation.linearLocation : emulation.smoothLocation);
         } else if (const auto builtin = BuiltInForInput(input.kind); builtin != NoBuiltIn) {
             state.module.AddAnnotation(spv::OpDecorate, input.variableId, spv::DecorationBuiltIn, builtin);
+        }
+    }
+    if (!state.perVertexPlanes.empty() || derivedLinear) {
+        state.perVertexPlaneBarycentric = InputVariableForKind(state, reconstructionKind);
+        if (state.perVertexPlaneBarycentric == 0u) {
+            const bool smooth = reconstructionKind == StageInputKind::BaryCoordSmooth;
+            state.perVertexPlaneBarycentric = DefineInterfaceVariable(state, TypeF32Vector(state, 3u), spv::StorageClassInput, smooth ? "gl_BaryCoordEXT" : "gl_BaryCoordNoPerspEXT");
+            state.module.AddAnnotation(spv::OpDecorate, state.perVertexPlaneBarycentric, spv::DecorationBuiltIn, smooth ? spv::BuiltInBaryCoordKHR : spv::BuiltInBaryCoordNoPerspKHR);
+        }
+    }
+    if (derivedLinear) {
+        state.perVertexFragCoord = InputVariableForKind(state, StageInputKind::FragCoord);
+        if (state.perVertexFragCoord == 0u) {
+            state.perVertexFragCoord = DefineInterfaceVariable(state, TypeF32Vector(state, 4u), spv::StorageClassInput, "gl_FragCoord");
+            state.module.AddAnnotation(spv::OpDecorate, state.perVertexFragCoord, spv::DecorationBuiltIn, spv::BuiltInFragCoord);
         }
     }
     if (state.requirements.subgroupLocalInvocationId) {

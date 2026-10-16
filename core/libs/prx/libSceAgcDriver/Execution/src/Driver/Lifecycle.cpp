@@ -41,6 +41,9 @@ void PrintFailure(std::exception_ptr error) {
         std::rethrow_exception(error);
     } catch (const std::exception& cause) {
         std::fprintf(stderr, "[gpu] driver failure: %s\n", cause.what());
+#if defined(__APPLE__)
+        PrintRecentWork();
+#endif
     } catch (...) {
         std::fprintf(stderr, "[gpu] driver failure with a non-standard exception\n");
     }
@@ -58,6 +61,10 @@ bool StackHoldsImport() {
         std::uintptr_t low = 0;
         std::uintptr_t high = 0;
         Bounds() {
+#if defined(__APPLE__)
+            high = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+            low = high - pthread_get_stacksize_np(pthread_self());
+#else
             pthread_attr_t attributes;
             if (pthread_getattr_np(pthread_self(), &attributes) != 0) return;
             void* base = nullptr;
@@ -67,6 +74,7 @@ bool StackHoldsImport() {
                 high = low + size;
             }
             pthread_attr_destroy(&attributes);
+#endif
         }
     };
     thread_local const Bounds bounds;

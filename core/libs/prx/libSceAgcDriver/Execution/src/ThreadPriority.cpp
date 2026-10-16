@@ -12,6 +12,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
 #else
 #include <dlfcn.h>
 #include <sched.h>
@@ -42,7 +45,7 @@ void LogOnce(const char* role, const std::string& text) {
     std::fprintf(stderr, "[thread-priority] %s: %s\n", role, text.c_str());
 }
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 
 struct DBusConnection;
 struct DBusMessage;
@@ -266,6 +269,16 @@ void Raise(const char* role) {
         throw std::runtime_error(std::string("APS5_THREAD_PRIORITY=high: ") + role + " nice " + std::to_string(nice) + " refused: " + failure);
     }
     LogOnce(role, "nice " + std::to_string(nice) + " via rtkit");
+}
+
+#elif defined(__APPLE__)
+
+void Raise(const char* role) {
+    const auto qos = RequestedMode() == ThreadPriorityMode::Realtime ? QOS_CLASS_USER_INTERACTIVE : QOS_CLASS_USER_INITIATED;
+    if (const int error = pthread_set_qos_class_self_np(qos, 0); error != 0) {
+        throw std::runtime_error(std::string("APS5_THREAD_PRIORITY: ") + role + " pthread_set_qos_class_self_np failed (error " + std::to_string(error) + ")");
+    }
+    LogOnce(role, qos == QOS_CLASS_USER_INTERACTIVE ? "QoS user-interactive" : "QoS user-initiated");
 }
 
 #else

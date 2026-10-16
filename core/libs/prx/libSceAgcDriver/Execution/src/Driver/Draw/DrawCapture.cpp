@@ -73,6 +73,10 @@ std::shared_ptr<const ShaderRecompiler::RecompileResult> Driver::materializeDraw
         phaseMs[DrawRowCapture] -= waited;
         phaseMs[DrawRowCaptureHookWaits] += waited;
     }
+#if defined(__APPLE__)
+    static const std::uint64_t dumpShader = [] { const char* text = std::getenv("APS5_DUMP_DRAW_SHADER"); return text ? std::strtoull(text, nullptr, 16) : 0ull; }();
+    if (dumpShader != 0 && std::any_of(programs.begin(), programs.end(), [](const DrawProgram& candidate) { return candidate.binary.codeAddress == dumpShader; })) static_cast<void>(dumpRequest(program.binary.codeAddress, request));
+#endif
     if (dumpTarget != 0) {
 
         const auto slot0 = (static_cast<std::uint64_t>(readRegister(queue.context, 0x390)) << 40u) | (static_cast<std::uint64_t>(readRegister(queue.context, 0x318)) << 8u);
