@@ -124,7 +124,6 @@ std::uint32_t BdaInvocationFaulted(SpirvEmitterState& state) {
 }
 
 void StopBdaInvocationIf(SpirvEmitterState& state, std::uint32_t condition) {
-    if (!state.bdaStopsInvocations) return;
     if (state.bdaFaultMasksWrites && state.bdaStopValue == 0) {
         for (std::uint32_t half = 0; half < state.laneCount; half++) {
             if (half != state.laneHalf && !state.laneValueShared) continue;
@@ -132,6 +131,7 @@ void StopBdaInvocationIf(SpirvEmitterState& state, std::uint32_t condition) {
         }
         return;
     }
+    if (!state.bdaStopsInvocations) return;
     const auto failed = state.module.AllocateId();
     const auto next = state.module.AllocateId();
     state.module.AddFunction(spv::OpSelectionMerge, next, spv::SelectionControlMaskNone);
