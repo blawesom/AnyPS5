@@ -312,13 +312,55 @@ static void TestInvalidApply() {
     Require(sceNgs2GeomApply(&work, &source, nullptr, 0) == SCE_NGS2_ERROR_INVALID_OUT_ADDRESS);
     RejectApply(nullptr, &source, 0);
     RejectApply(&work, nullptr, 0);
-    RejectApply(&work, &source, 1);
+    RejectApply(&work, &source, 0x20u);
+    RejectApply(&work, &source, 0x100u);
     RejectApply(&work, &source, 0xffffffffu);
     source.position.x = std::numeric_limits<float>::infinity();
     RejectApply(&work, &source, 0);
     source = Source();
     source.fbw_level = std::numeric_limits<float>::quiet_NaN();
     RejectApply(&work, &source, 0);
+}
+
+static void TestApplyFlags() {
+    const auto work = ListenerWork();
+    auto source = Source();
+    source.position = {0.0f, 0.0f, 10.0f};
+    source.velocity = {0.0f, 0.0f, -34.3f};
+    Ngs2GeomAttribute attribute;
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 0) == SCE_NGS2_OK);
+    Ngs2GeomAttribute defaultAttribute;
+    Require(sceNgs2GeomApply(&work, &source, &defaultAttribute, 15) == SCE_NGS2_OK);
+    Require(std::memcmp(&attribute, &defaultAttribute, sizeof(attribute)) == 0);
+    Require(Near(attribute.pitch_ratio, 1.1111111f));
+    Require(attribute.a3d_attrib.position.z == 10.0f);
+    Require(attribute.level[0] > 0.0f);
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 2) == SCE_NGS2_OK);
+    Require(Near(attribute.pitch_ratio, 1.1111111f));
+    Require(attribute.a3d_attrib.position.z == 0.0f);
+    RequireZero(attribute, 0, 64);
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 4) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 0.0f);
+    Require(attribute.a3d_attrib.position.z == 0.0f);
+    Require(attribute.level[0] > 0.0f);
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 8) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 0.0f);
+    Require(attribute.a3d_attrib.position.z == 10.0f);
+    RequireZero(attribute, 0, 64);
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 1) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 0.0f);
+    Require(attribute.a3d_attrib.position.z == 10.0f);
+    Require(attribute.level[0] > 0.0f);
+
+    Require(sceNgs2GeomApply(&work, &source, &attribute, 16) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 0.0f);
+    Require(attribute.a3d_attrib.position.z == 0.0f);
+    RequireZero(attribute, 0, 64);
 }
 
 int main() {
@@ -331,6 +373,7 @@ int main() {
     TestApplyStereo();
     TestApplySurround();
     TestApplyDistanceConeDoppler();
+    TestApplyFlags();
     TestInvalidApply();
     return 0;
 }

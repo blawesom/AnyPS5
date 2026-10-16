@@ -80,6 +80,15 @@ void RequireFinite(const Ngs2GeomListenerWork& work, const Ngs2GeomSourceParam& 
 
 constexpr std::uint32_t GEOM_MAX_CHANNELS = 8;
 
+constexpr std::uint32_t GEOM_FLAG_SOURCE_ANGLE = 1;
+constexpr std::uint32_t GEOM_FLAG_SOURCE_DOPPLER = 2;
+constexpr std::uint32_t GEOM_FLAG_VOLUME_MATRIX = 4;
+constexpr std::uint32_t GEOM_FLAG_A3D_ATTRIBUTE = 8;
+constexpr std::uint32_t GEOM_FLAG_A3D_AMBISONICS = 16;
+constexpr std::uint32_t GEOM_FLAG_DEFAULT =
+    GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_SOURCE_DOPPLER | GEOM_FLAG_VOLUME_MATRIX | GEOM_FLAG_A3D_ATTRIBUTE;
+constexpr std::uint32_t GEOM_SUPPORTED_FLAGS = GEOM_FLAG_DEFAULT | GEOM_FLAG_A3D_AMBISONICS;
+
 struct GeomSpeaker {
     double azimuth;
     bool lfe;
@@ -288,26 +297,33 @@ int Ngs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
 int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
     if (listener == nullptr || source == nullptr) APS5_INVALID_ARG_EX;
     if (out_attrib == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
-    if (flags != 0) throw std::runtime_error("NGS2: unknown geometry apply flags");
+    if ((flags & ~GEOM_SUPPORTED_FLAGS) != 0) throw std::runtime_error("NGS2: unknown geometry apply flags");
+    if (flags == 0) flags = GEOM_FLAG_DEFAULT;
     RequireFinite(*listener, *source);
     const Vector local = TransformPoint(*listener, source->position);
     const double distance = std::hypot(local[0], local[1], local[2]);
     const double level = std::clamp(DistanceGain(source->rolloff, distance) * ConeGain(*listener, *source, local, distance),
         std::min<double>(source->min_level, source->max_level), static_cast<double>(source->max_level));
     Ngs2GeomAttribute attribute{};
-    attribute.pitch_ratio = static_cast<float>(DopplerRatio(*listener, *source, local, distance));
-    attribute.a3d_attrib.position = {static_cast<float>(local[0]), static_cast<float>(local[1]), static_cast<float>(local[2])};
-    attribute.a3d_attrib.volume = static_cast<float>(level);
-    const GeomLayout layout = SpeakerLayout(source->num_speakers);
-    double gains[GEOM_MAX_CHANNELS] = {};
-    PanGains(layout, local, distance, source->radius, gains);
-    for (std::uint32_t index = 0; index < layout.count; index++) {
-        gains[index] *= level * (layout.channels[index].lfe ? source->lfe_level : source->fbw_level);
+    if ((flags & GEOM_FLAG_SOURCE_DOPPLER) != 0) {
+        attribute.pitch_ratio = static_cast<float>(DopplerRatio(*listener, *source, local, distance));
     }
-    const std::uint32_t inputs = std::clamp<std::uint32_t>(source->matrix_format, 1, GEOM_MAX_CHANNELS);
-    for (std::uint32_t input = 0; input < inputs; input++) {
-        for (std::uint32_t output = 0; output < GEOM_MAX_CHANNELS; output++) {
-            attribute.level[input * GEOM_MAX_CHANNELS + output] = static_cast<float>(gains[output]);
+    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_A3D_ATTRIBUTE)) != 0) {
+        attribute.a3d_attrib.position = {static_cast<float>(local[0]), static_cast<float>(local[1]), static_cast<float>(local[2])};
+        attribute.a3d_attrib.volume = static_cast<float>(level);
+    }
+    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_VOLUME_MATRIX)) != 0) {
+        const GeomLayout layout = SpeakerLayout(source->num_speakers);
+        double gains[GEOM_MAX_CHANNELS] = {};
+        PanGains(layout, local, distance, source->radius, gains);
+        for (std::uint32_t index = 0; index < layout.count; index++) {
+            gains[index] *= level * (layout.channels[index].lfe ? source->lfe_level : source->fbw_level);
+        }
+        const std::uint32_t inputs = std::clamp<std::uint32_t>(source->matrix_format, 1, GEOM_MAX_CHANNELS);
+        for (std::uint32_t input = 0; input < inputs; input++) {
+            for (std::uint32_t output = 0; output < GEOM_MAX_CHANNELS; output++) {
+                attribute.level[input * GEOM_MAX_CHANNELS + output] = static_cast<float>(gains[output]);
+            }
         }
     }
     *out_attrib = attribute;
