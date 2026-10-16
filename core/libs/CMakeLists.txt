@@ -180,6 +180,23 @@ foreach(LIB_DIR ${LIBS_DIRS})
     endif()
 endforeach()
 
+if(APPLE AND TARGET SDL2 AND NOT ANYPS5_USE_SYSTEM_DEPS)
+    set_target_properties(SDL2 PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY ${UNPATCHED_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${UNPATCHED_DIR}
+    )
+    set(SDL2_COPIED ${CMAKE_CURRENT_BINARY_DIR}/SDL2.copied)
+    add_custom_command(
+            OUTPUT ${SDL2_COPIED}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${PATCHED_DIR}
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL2> ${PATCHED_DIR}/$<TARGET_SONAME_FILE_NAME:SDL2>
+            COMMAND ${CMAKE_COMMAND} -E touch ${SDL2_COPIED}
+            DEPENDS SDL2
+            COMMENT "Copying the shared SDL2 library next to the patched libraries"
+    )
+    list(APPEND PATCHED_OUTPUTS ${SDL2_COPIED})
+endif()
+
 if(APS5_ENABLE_TRACY)
     set_target_properties(TracyClient PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY ${UNPATCHED_DIR}

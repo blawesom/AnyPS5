@@ -12,14 +12,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <typeinfo>
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI getpid_nid_postfix(void);
 extern "C" Pthread APS5_VABI scePthreadSelf(void);
+#if defined(__APPLE__)
+extern "C" void* APS5_VABI __cxa_allocate_exception_nid_postfix(std::size_t);
+extern "C" [[noreturn]] void APS5_VABI __cxa_throw_nid_postfix(void*, std::type_info*, void (*)(void*));
+#endif
 
 struct GuestSignalSet {
     std::uint32_t bits[4];
@@ -281,6 +287,15 @@ std::string DescribeInterval(std::chrono::microseconds interval) {
     return text;
 }
 
+#if defined(__APPLE__)
+[[noreturn]] void ThrowExpiry(const std::string& message) {
+    void* object = __cxa_allocate_exception_nid_postfix(sizeof(std::runtime_error));
+    new (object) std::runtime_error(message);
+    __cxa_throw_nid_postfix(object, const_cast<std::type_info*>(&typeid(std::runtime_error)),
+        [](void* error) { static_cast<std::runtime_error*>(error)->~runtime_error(); });
+}
+#endif
+
 void ExpireAlarm(std::chrono::microseconds interval) {
     std::uintptr_t handler = 0;
     {
@@ -289,13 +304,21 @@ void ExpireAlarm(std::chrono::microseconds interval) {
     }
     if (handler == 1) return;
     if (SignalBlocked(GuestSigalrm))
+#if defined(__APPLE__)
+        ThrowExpiry("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired while SIGALRM is blocked: pending signals are not implemented");
+#else
         throw std::runtime_error("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired while SIGALRM is blocked: pending signals are not implemented");
+#endif
     if (handler == 0) {
         std::fprintf(stderr, "SIGALRM: the alarm expired with the default disposition; the process terminates\n");
         std::fflush(stderr);
         std::_Exit(128 + GuestSigalrm);
     }
+#if defined(__APPLE__)
+    ThrowExpiry("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired: delivering SIGALRM to a guest handler is not implemented");
+#else
     throw std::runtime_error("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired: delivering SIGALRM to a guest handler is not implemented");
+#endif
 }
 
 void RunAlarms() {

@@ -17,6 +17,7 @@
 #endif
 #ifdef __APPLE__
 #include <dlfcn.h>
+#include <libunwind.h>
 #include <mach-o/getsect.h>
 #include <mach-o/loader.h>
 #endif
@@ -235,6 +236,31 @@ bool VirtualUnwind(const _Unwind_Context& context, _Unwind_Context& caller) {
 }
 #endif
 
+#ifdef __APPLE__
+bool VirtualUnwind(const _Unwind_Context& context, _Unwind_Context& caller) {
+    unw_context_t state;
+    unw_cursor_t cursor;
+    if (unw_getcontext(&state) != 0 || unw_init_local(&cursor, &state) != 0) return false;
+    for (int i = 0; i < 16; ++i)
+        if (unw_set_reg(&cursor, i, context.registers[i]) != 0) return false;
+    if (unw_set_reg(&cursor, UNW_REG_IP, context.registers[16] - !context.signalFrame) != 0) return false;
+    if (unw_step(&cursor) <= 0) return false;
+    caller = context;
+    for (int i = 0; i < 16; ++i) {
+        unw_word_t value = 0;
+        if (unw_get_reg(&cursor, i, &value) != 0) return false;
+        caller.registers[i] = value;
+    }
+    unw_word_t ip = 0;
+    unw_word_t sp = 0;
+    if (unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0 || unw_get_reg(&cursor, UNW_REG_SP, &sp) != 0) return false;
+    caller.registers[7] = sp;
+    caller.registers[16] = ip;
+    caller.signalFrame = false;
+    return true;
+}
+#endif
+
 bool DecodeFrame(_Unwind_Context& context, Frame& frame) {
     Lookup query {context.registers[16] - !context.signalFrame};
 #if defined(__linux__) || defined(__APPLE__)
@@ -360,7 +386,7 @@ bool Expression(const Byte* p, const _Unwind_Context& context, Word cfa, Word& r
 
 bool GetRules(_Unwind_Context& context, Frame& frame, Rules& rules) {
     if (!DecodeFrame(context, frame)) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         frame = {};
         if (!VirtualUnwind(context, frame.caller)) return false;
         frame.foreign = true;
@@ -391,7 +417,7 @@ bool GetRules(_Unwind_Context& context, Frame& frame, Rules& rules) {
 bool Step(_Unwind_Context& context) {
     Frame frame; Rules rules;
     if (!GetRules(context, frame, rules)) return false;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     if (frame.foreign) {
         const auto& next = frame.caller;
         if (!next.registers[16] || (next.registers[7] == context.registers[7] && next.registers[16] == context.registers[16])) return false;

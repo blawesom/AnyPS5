@@ -20,6 +20,8 @@
 #include <dlfcn.h>
 #include <mach-o/getsect.h>
 #include <mach-o/loader.h>
+#include <mutex>
+#include <unordered_map>
 #else
 #include <string_view>
 #include "prx/libc/include/specifics/linux/HostMapping.hpp"
@@ -149,6 +151,27 @@ void FillGuestUnwindInfo(std::uint64_t address, ModuleInfoForUnwind* info) {
 }
 #endif
 
+#if defined(__APPLE__)
+namespace {
+EhFrame::Tables AppleFrameTables(const dl_phdr_info& image, std::uintptr_t header) {
+  static std::mutex lock;
+  static auto* cache = new std::unordered_map<std::uintptr_t, EhFrame::Tables>();
+  std::lock_guard guard(lock);
+  if (const auto found = cache->find(header); found != cache->end()) return found->second;
+  const auto contains = [&](std::uintptr_t begin, std::uint64_t size) {
+    for (std::uint16_t index = 0; index < image.dlpi_phnum; ++index) {
+      const auto& segment = image.dlpi_phdr[index];
+      if (segment.p_type != PT_LOAD) continue;
+      const std::uintptr_t start = image.dlpi_addr + segment.p_vaddr;
+      if (begin >= start && begin - start <= segment.p_memsz && size <= segment.p_memsz - (begin - start)) return true;
+    }
+    return false;
+  };
+  return cache->emplace(header, EhFrame::ReadTables(contains, header, "sceKernelGetModuleInfoForUnwind")).first->second;
+}
+}
+#endif
+
 extern "C" {
 void* APS5_VABI dlopen_nid_postfix(const char* path, int flags);
 void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name);
@@ -220,6 +243,14 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
     info->eh_frame_hdr_addr = frames != nullptr ? image->dlpi_addr + frames->p_vaddr : 0;
     info->eh_frame_addr = 0;
     info->eh_frame_size = 0;
+    if (frames != nullptr) {
+      try {
+        const auto tables = AppleFrameTables(*image, info->eh_frame_hdr_addr);
+        info->eh_frame_addr = tables.frames;
+        info->eh_frame_size = tables.framesSize + 4;
+      } catch (const std::runtime_error&) {
+      }
+    }
     info->seg0_addr = image->dlpi_addr + first->p_vaddr;
     info->seg0_size = first->p_memsz;
     search.found = true;

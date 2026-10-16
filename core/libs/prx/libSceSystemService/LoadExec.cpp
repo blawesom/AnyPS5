@@ -21,6 +21,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 extern char** environ;
+#elif defined(__APPLE__)
+#include <fcntl.h>
+#include <unistd.h>
+extern char** environ;
 #endif
 
 namespace {
@@ -163,12 +167,35 @@ Handle Duplicate(HANDLE source, DWORD access) {
     fexecve(descriptor, pointers.data(), environ);
     throw std::system_error(errno, std::generic_category(), "LoadExec: replacing the executable");
 }
+#elif defined(__APPLE__)
+[[noreturn]] void Replace(const std::filesystem::path& target, const std::vector<std::string>& arguments) {
+    const int descriptor = open(target.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) throw std::system_error(errno, std::generic_category(), "LoadExec: opening the converted executable");
+    std::array<unsigned char, 8> header{};
+    const bool complete = pread(descriptor, header.data(), header.size(), 0) == static_cast<ssize_t>(header.size());
+    ::close(descriptor);
+    constexpr std::array<unsigned char, 8> machO{0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01};
+    if (!complete || header != machO || access(target.c_str(), X_OK) != 0) throw std::runtime_error("LoadExec: target is not an executable x86-64 Mach-O");
+    std::vector<char*> pointers;
+    for (const auto& argument : arguments) pointers.push_back(const_cast<char*>(argument.c_str()));
+    pointers.push_back(nullptr);
+    LibcRunShutdown_nid_postfix();
+    std::fflush(nullptr);
+    std::filesystem::current_path(target.parent_path());
+    const int limit = getdtablesize();
+    for (int inherited = 3; inherited < limit; ++inherited) {
+        const int flags = fcntl(inherited, F_GETFD);
+        if (flags >= 0 && fcntl(inherited, F_SETFD, flags | FD_CLOEXEC) != 0) throw std::system_error(errno, std::generic_category(), "LoadExec: closing the old executable's descriptors");
+    }
+    execve(target.c_str(), pointers.data(), environ);
+    throw std::system_error(errno, std::generic_category(), "LoadExec: replacing the executable");
+}
 #endif
 
 }
 
 extern "C" bool LoadConvertedExecutable_nid_no_patch(const std::filesystem::path& target, const char* const* arguments) {
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
     if (!arguments || !arguments[0]) return false;
     std::vector<std::string> copied;
     for (std::size_t index = 0; arguments[index]; ++index) copied.emplace_back(arguments[index]);

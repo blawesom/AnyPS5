@@ -20,6 +20,7 @@
 #include "prx/libc/include/specifics/gcc/AtomicOps.hpp"
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/HostEntropy.hpp"
+#include "prx/libc/include/HostIntegerParse.hpp"
 
 namespace {
 
@@ -114,12 +115,12 @@ unsigned int APS5_VABI _Atomic_load_4_nid_postfix(volatile unsigned int* target,
 
 std::intmax_t APS5_VABI strtoimax_nid_postfix(const char* str, char** endptr, int base) {
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
-    return std::strtoimax(str, endptr, base);
+    return HostStrtoimax(str, endptr, base);
 }
 
 std::uintmax_t APS5_VABI strtoumax_nid_postfix(const char* str, char** endptr, int base) {
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
-    return std::strtoumax(str, endptr, base);
+    return HostStrtoumax(str, endptr, base);
 }
 
 unsigned int APS5_VABI _ZSt14_Random_devicev_nid_postfix() {
@@ -169,7 +170,7 @@ int APS5_VABI ftrylockfile_nid_postfix(FileStream* stream) {
 
 std::uint64_t APS5_VABI _Stoul_nid_postfix(const char* str, char** endptr, int base) {
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
-    return std::strtoull(str, endptr, base);
+    return HostStrtoull(str, endptr, base);
 }
 
 void APS5_VABI _Locksyslock_nid_postfix() {

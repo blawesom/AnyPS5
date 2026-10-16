@@ -442,7 +442,13 @@ void SleepNanos(std::uint64_t nanos) {
     struct timespec req{};
     req.tv_sec = static_cast<time_t>(nanos / 1000000000ULL);
     req.tv_nsec = static_cast<long>(nanos % 1000000000ULL);
+#if defined(__APPLE__)
+    const int savedError = errno;
+#endif
     while (nanosleep(&req, &req) == -1 && errno == EINTR) {}
+#if defined(__APPLE__)
+    errno = savedError;
+#endif
 #endif
 }
 

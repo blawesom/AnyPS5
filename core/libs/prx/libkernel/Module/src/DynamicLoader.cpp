@@ -21,7 +21,11 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#if defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#else
 #include <link.h>
+#endif
 #endif
 
 #ifdef _WIN32
@@ -37,6 +41,9 @@ void Error(const char* message) {
 }
 struct Module {
     void* native = nullptr;
+#if defined(__APPLE__)
+    const void* image = nullptr;
+#endif
     bool owned = true;
     bool global = false;
     ~Module() {
@@ -190,6 +197,10 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             ((flags & 0x100) ? RTLD_GLOBAL : RTLD_LOCAL);
         module->native = ::dlopen(path ? resolved.c_str() : nullptr, nativeFlags);
         if (!module->native) { Error(::dlerror()); return nullptr; }
+#if defined(__APPLE__)
+        link_map* image = nullptr;
+        if (::dlinfo(module->native, RTLD_DI_LINKMAP, &image) == 0) module->image = image;
+#endif
 #endif
         std::lock_guard lock(modulesMutex);
         const auto handle = nextHandle++;
@@ -259,7 +270,11 @@ int APS5_VABI dlclose_nid_postfix(void* handle) {
 std::int32_t ModuleIdForImage_nid_no_patch(const void* native) {
     std::lock_guard lock(modulesMutex);
     for (const auto& [handle, module] : modules) {
+#if defined(__APPLE__)
+        if (module->image == native || module->native == native) return static_cast<std::int32_t>(handle);
+#else
         if (module->native == native) return static_cast<std::int32_t>(handle);
+#endif
     }
     const auto [found, inserted] = imageIds.emplace(native, nextHandle);
     if (inserted) ++nextHandle;

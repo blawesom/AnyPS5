@@ -1,3 +1,5 @@
+#include "prx/libc/include/GuestWriteWatch.hpp"
+#include "prx/libc/include/specifics/macos/HostRegions.hpp"
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -342,6 +344,16 @@ int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInf
  info->end = info->start + host.RegionSize;
  const bool writable = (host.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY)) != 0;
  const bool executable = (host.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+ #elif defined(__APPLE__)
+ HostRegions::Region host;
+ if (!HostRegions::Containing(address, host)) return SCE_KERNEL_ERROR_EACCES;
+ std::uintptr_t watchedEnd = host.end;
+ const int watched = GuestWriteWatch::GuestWriteWatchProtection_nid_postfix(address, host.end, &watchedEnd);
+ if (!(watched >= 0 ? (watched & PROT_READ) != 0 : host.readable)) return SCE_KERNEL_ERROR_EACCES;
+ info->start = host.begin;
+ info->end = host.end;
+ const bool writable = watched >= 0 ? (watched & PROT_WRITE) != 0 : host.writable;
+ const bool executable = host.executable;
  #else
  std::ifstream maps("/proc/self/maps");
  std::string line;
@@ -629,7 +641,21 @@ int UnlockHostPages(std::uintptr_t start, std::uintptr_t end) {
     return 0;
 }
 #else
+#if defined(__APPLE__)
+bool HostRangeAccessible(std::uintptr_t start, std::uintptr_t end) {
+    for (auto cursor = start; cursor < end;) {
+        HostRegions::Region region;
+        if (!HostRegions::Containing(cursor, region) || !(region.readable || region.writable || region.executable)) return false;
+        cursor = region.end;
+    }
+    return true;
+}
+#endif
+
 int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
+#if defined(__APPLE__)
+    if (!HostRangeAccessible(start, end)) return SCE_KERNEL_ERROR_ENOMEM;
+#endif
     auto* const address = reinterpret_cast<void*>(start);
     const std::size_t bytes = end - start;
     if (::mlock(address, bytes) == 0) {
@@ -689,7 +715,7 @@ int APS5_VABI sceKernelMunlock_nid_postfix(void* address, std::uint64_t length) 
 }
 
 int APS5_VABI sceKernelMunlockall_nid_postfix() {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     ::munlockall();
 #endif
     std::map<uintptr_t, size_t> ranges;
@@ -697,6 +723,11 @@ int APS5_VABI sceKernelMunlockall_nid_postfix() {
         std::lock_guard lock(g_lockedRangesLock);
         ranges.swap(g_lockedRanges);
     }
+#if defined(__APPLE__)
+    const int savedError = errno;
+    for (const auto& [start, len] : ranges) ::munlock(reinterpret_cast<void*>(start), len);
+    errno = savedError;
+#endif
 #ifdef _WIN32
     for (const auto& [start, len] : ranges) {
         const auto end = start + len;

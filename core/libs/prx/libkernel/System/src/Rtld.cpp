@@ -16,7 +16,11 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#if defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#else
 #include <link.h>
+#endif
 #endif
 
 #ifdef _WIN32

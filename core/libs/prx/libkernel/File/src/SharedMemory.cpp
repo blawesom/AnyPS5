@@ -1,3 +1,4 @@
+#include "prx/libc/include/specifics/macos/PosixMemory.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/File/include/SharedMemory.hpp"
@@ -32,13 +33,35 @@
 #include <unistd.h>
 #include <cstdio>
 #endif
+#if defined(__APPLE__)
+#include <mutex>
+#include <set>
+#include <utility>
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 
 namespace {
 
+#if defined(__APPLE__)
+std::mutex anonymousObjectsLock;
+std::set<std::pair<dev_t, ino_t>> anonymousObjects;
+
+void RememberAnonymousObject(int descriptor) {
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0) return;
+    std::lock_guard lock(anonymousObjectsLock);
+    anonymousObjects.emplace(status.st_dev, status.st_ino);
+}
+#endif
+
 bool IsHostSharedMemoryDescriptor(int descriptor) {
-#ifdef __linux__
+#if defined(__APPLE__)
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 0) return false;
+    std::lock_guard lock(anonymousObjectsLock);
+    return anonymousObjects.contains({status.st_dev, status.st_ino});
+#elif defined(__linux__)
     char descriptorPath[64];
     std::snprintf(descriptorPath, sizeof(descriptorPath), "/proc/self/fd/%d", descriptor);
     char objectPath[4096];
@@ -209,7 +232,12 @@ int CreateAnonymousFile() {
     errno = EEXIST;
     return -1;
 #else
+#if defined(__APPLE__)
+    const int descriptor = PosixMemory::CreateResizableFile("anyps5 shm_open");
+    if (descriptor >= 0) RememberAnonymousObject(descriptor);
+#else
     const int descriptor = memfd_create("anyps5 shm_open", MFD_CLOEXEC);
+#endif
     return descriptor;
 #endif
 }

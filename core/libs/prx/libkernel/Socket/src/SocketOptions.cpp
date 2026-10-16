@@ -1,3 +1,8 @@
+#if defined(__APPLE__)
+#include <libproc.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+#endif
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -180,8 +185,14 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
         number = enabled != 0 ? option : 0;
     } else if (option == GuestAcceptConnection) {
         int listening = 0;
+#if defined(__APPLE__)
+        socket_fdinfo socketInfo{};
+        if (proc_pidfdinfo(getpid(), handle, PROC_PIDFDSOCKETINFO, &socketInfo, sizeof(socketInfo)) != static_cast<int>(sizeof(socketInfo))) return HostError();
+        listening = (socketInfo.psi.soi_options & SO_ACCEPTCONN) != 0;
+#else
         socklen_t size = sizeof(listening);
         if (::getsockopt(handle, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<NativeOptionOutput>(&listening), &size)) return HostError();
+#endif
         number = listening != 0 ? GuestAcceptConnection : 0;
     } else if (option == GuestType) {
         number = type;

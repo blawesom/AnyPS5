@@ -12,6 +12,10 @@
 #include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <libproc.h>
+#include "prx/libc/include/specifics/macos/HostRegions.hpp"
+#endif
 #if __has_include(<linux/fs.h>)
 #include <linux/fs.h>
 #endif
@@ -88,6 +92,14 @@ inline std::optional<Mapping> ScanMaps(std::uint64_t address, const char* caller
 }
 
 inline std::optional<Mapping> Find(std::uint64_t address, const char* caller) {
+#if defined(__APPLE__)
+    static_cast<void>(caller);
+    HostRegions::Region region;
+    if (!HostRegions::Containing(static_cast<std::uintptr_t>(address), region)) return std::nullopt;
+    char name[PROC_PIDPATHINFO_MAXSIZE] = {};
+    const int length = proc_regionfilename(getpid(), address, name, sizeof(name));
+    return Mapping{region.begin, region.end, length > 0 ? std::string(name, static_cast<std::size_t>(length)) : std::string()};
+#else
     const int fd = QueryFd();
     if (fd < 0) return ScanMaps(address, caller);
     char name[4096] = {};
@@ -101,6 +113,7 @@ inline std::optional<Mapping> Find(std::uint64_t address, const char* caller) {
         throw std::runtime_error(std::string(caller) + ": PROCMAP_QUERY failed");
     }
     return Mapping{query.vma_start, query.vma_end, query.vma_name_size != 0 ? name : ""};
+#endif
 }
 
 }

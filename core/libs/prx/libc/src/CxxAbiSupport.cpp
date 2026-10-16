@@ -19,6 +19,8 @@
 #include <functional>
 #include <mutex>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
@@ -61,7 +63,40 @@ void* APS5_VABI __cxa_demangle_nid_postfix(const char* mangled, char* buf, std::
     return result;
 }
 
+#ifdef __APPLE__
+}
+
+namespace {
+
+struct ThreadExitDestructors {
+    std::vector<std::pair<void (APS5_VABI *)(void*), void*>> entries;
+
+    ~ThreadExitDestructors() {
+        while (!entries.empty()) {
+            const auto entry = entries.back();
+            entries.pop_back();
+            entry.first(entry.second);
+        }
+    }
+};
+
+thread_local ThreadExitDestructors threadExitDestructors;
+
+}
+
+extern "C" {
+#endif
+
 int APS5_VABI __cxa_thread_atexit_impl_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dso) {
+#ifdef __APPLE__
+    (void)dso;
+    try {
+        threadExitDestructors.entries.emplace_back(func, arg);
+    } catch (const std::bad_alloc&) {
+        return -1;
+    }
+    return 0;
+#else
 #ifdef _WIN32
     dso = nullptr;
 #endif
@@ -84,6 +119,7 @@ int APS5_VABI __cxa_thread_atexit_impl_nid_postfix(void (APS5_VABI *func)(void*)
     if (result != 0)
         delete context;
     return result;
+#endif
 }
 
 int APS5_VABI __cxa_thread_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dso) {

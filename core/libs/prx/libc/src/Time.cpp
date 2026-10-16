@@ -25,7 +25,7 @@ constexpr const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 constexpr std::size_t ASCTIME_SIZE = sizeof("Sun Jan-2147483648 -2147483648:-2147483648:-2147483648     -2147481748\n");
 constexpr std::int64_t SECONDS_PER_DAY = 86400;
 constexpr std::int64_t DAYS_FROM_MARCH_TO_YEAR_END = 306;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 constexpr std::int64_t CALENDAR_CYCLE_YEARS = 400;
 constexpr std::int64_t CALENDAR_CYCLE_SECONDS = 146097 * SECONDS_PER_DAY;
 constexpr std::int64_t HOST_LAST_SECOND = 32535215999;
@@ -72,7 +72,7 @@ std::tm toHostTm(const GuestTm& guest) {
     host.tm_isdst = guest.tm_isdst;
 #ifndef _WIN32
     host.tm_gmtoff = static_cast<long>(guest.tm_gmtoff);
-    host.tm_zone = guest.tm_zone;
+    host.tm_zone = const_cast<decltype(host.tm_zone)>(guest.tm_zone);
 #endif
     return host;
 }
@@ -530,7 +530,7 @@ int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
     std::tm host = toHostTm(*timeptr);
     host.tm_wday = -1;
     int64_t moved = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     const bool ordinary = host.tm_year > 70 && host.tm_year < 1100 && host.tm_mon >= 0 && host.tm_mon < 12 && host.tm_mday >= 1 && host.tm_mday <= 31
         && host.tm_hour >= 0 && host.tm_hour < 24 && host.tm_min >= 0 && host.tm_min < 60 && host.tm_sec >= 0 && host.tm_sec <= 60;
     const std::int64_t approximate = ordinary ? SECONDS_PER_DAY : utcSeconds(host);

@@ -303,7 +303,9 @@ static std::int64_t NativePwrite(int descriptor, const void* buf, std::size_t nb
 #include <sys/file.h>
 #include <sys/time.h>
 #include <dirent.h>
+#if defined(__linux__)
 #include <sys/syscall.h>
+#endif
 #include <sys/uio.h>
 static int NativeRmdir(const std::filesystem::path& path) {
     return ::rmdir(path.c_str());
@@ -463,21 +465,35 @@ static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
 }
 #else
 #include <sys/statvfs.h>
+#if defined(__APPLE__)
+#include <sys/mount.h>
+#else
 #include <sys/vfs.h>
+#endif
 static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
-    constexpr long PipeFilesystem = 0x50495045;
     struct stat file{};
     if (::fstat(descriptor, &file) != 0) return SceErrorFromErrno(errno) & 0xffff;
+#if defined(__APPLE__)
+    if (S_ISSOCK(file.st_mode)) return GUEST_EINVAL;
+    if (S_ISFIFO(file.st_mode)) {
+        struct statfs kind{};
+        if (::fstatfs(descriptor, &kind) != 0) return GUEST_EINVAL;
+    }
+#else
+    constexpr long PipeFilesystem = 0x50495045;
     if (S_ISSOCK(file.st_mode) && (::fcntl(descriptor, F_GETFL) & O_PATH) == 0) return GUEST_EINVAL;
     if (S_ISFIFO(file.st_mode)) {
         struct statfs kind{};
         if (::fstatfs(descriptor, &kind) == 0 && static_cast<long>(kind.f_type) == PipeFilesystem) return GUEST_EINVAL;
     }
+#endif
     struct statvfs host{};
     if (::fstatvfs(descriptor, &host) != 0) return SceErrorFromErrno(errno) & 0xffff;
     if (host.f_flag & ST_RDONLY) fs->f_flags |= KERNEL_MNT_RDONLY;
     if (host.f_flag & ST_NOSUID) fs->f_flags |= KERNEL_MNT_NOSUID;
+#ifdef ST_NOEXEC
     if (host.f_flag & ST_NOEXEC) fs->f_flags |= KERNEL_MNT_NOEXEC;
+#endif
     fs->f_bsize = host.f_frsize != 0 ? host.f_frsize : host.f_bsize;
     fs->f_iosize = host.f_bsize;
     fs->f_blocks = host.f_blocks;
@@ -963,6 +979,8 @@ int APS5_VABI sceKernelFdatasync(int fd) {
     File::RefuseArchivedFile(fd, "fdatasync");
 #ifdef _WIN32
     if (NativeSync(fd) != 0) return SceErrorFromErrno(errno);
+#elif defined(__APPLE__)
+    if (::fsync(fd) != 0) return SceErrorFromErrno(errno);
 #else
     if (::fdatasync(fd) != 0) return SceErrorFromErrno(errno);
 #endif
@@ -1005,6 +1023,52 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
     const off_t base = ::lseek(fd, 0, SEEK_CUR);
     if (base < 0) return SceErrorFromErrno(errno);
     if (basep != nullptr) *basep = static_cast<int64_t>(base);
+#if defined(__APPLE__)
+    const int listing = ::dup(fd);
+    if (listing < 0) return SceErrorFromErrno(errno);
+    DIR* directory = ::fdopendir(listing);
+    if (directory == nullptr) {
+        const int error = errno;
+        ::close(listing);
+        return SceErrorFromErrno(error);
+    }
+    ::rewinddir(directory);
+    std::size_t written = 0;
+    off_t index = 0;
+    off_t resume = base;
+    const int savedErrno = errno;
+    errno = 0;
+    for (const struct dirent* entry; (entry = ::readdir(directory)) != nullptr; ++index) {
+        if (index < base) continue;
+        const std::size_t nameLength = entry->d_namlen;
+        const auto record = (GuestHeaderBytes + nameLength + 1 + 3) & ~std::size_t{3};
+        if (nameLength > GuestMaxName || written + record > static_cast<std::size_t>(nbytes)) {
+            ::closedir(directory);
+            if (::lseek(fd, resume, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+            errno = savedErrno;
+            if (written != 0) return static_cast<int>(written);
+            return nameLength > GuestMaxName ? static_cast<int>(0x80020000u | GUEST_ENAMETOOLONG) : SceErrorFromErrno(GUEST_EINVAL);
+        }
+        char* out = buf + written;
+        std::memset(out, 0, record);
+        const auto fileNumber = static_cast<std::uint32_t>(entry->d_ino);
+        const auto recordLength = static_cast<std::uint16_t>(record);
+        const auto nameBytes = static_cast<std::uint8_t>(nameLength);
+        std::memcpy(out, &fileNumber, sizeof(fileNumber));
+        std::memcpy(out + 4, &recordLength, sizeof(recordLength));
+        out[6] = static_cast<char>(entry->d_type);
+        out[7] = static_cast<char>(nameBytes);
+        std::memcpy(out + GuestHeaderBytes, entry->d_name, nameLength);
+        written += record;
+        resume = index + 1;
+    }
+    const int listError = errno;
+    ::closedir(directory);
+    if (listError != 0) return SceErrorFromErrno(listError);
+    if (::lseek(fd, resume, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+    errno = savedErrno;
+    return static_cast<int>(written);
+#else
     std::vector<char> host(static_cast<std::size_t>(nbytes) < 4096 ? 4096 : static_cast<std::size_t>(nbytes));
     const auto read = ::syscall(SYS_getdents64, fd, host.data(), host.size());
     if (read < 0) return SceErrorFromErrno(errno);
@@ -1035,6 +1099,7 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
     }
     if (::lseek(fd, resume, SEEK_SET) < 0) return SceErrorFromErrno(errno);
     return static_cast<int>(written);
+#endif
 }
 
 int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
@@ -1218,6 +1283,9 @@ int64_t APS5_VABI sceKernelReadv(int d, const KernelIovec* iov, int iovcnt) {
         return result < 0 ? SceKernelError(*__error_nid_postfix()) : result;
     }
     if (File::IsRandomDevice(d)) return ReadRandomIovecs(d, iov, iovcnt);
+#if defined(__APPLE__)
+    if (iovcnt == 0) return 0;
+#endif
     if (const auto archived = File::ReadArchivedIovecs(d, iov, iovcnt, nullptr)) return *archived;
     const auto result = static_cast<std::int64_t>(::readv(d, NativeIovecs(iov), iovcnt));
     return result < 0 ? SceErrorFromErrno(errno) : result;
@@ -1231,6 +1299,9 @@ int64_t APS5_VABI sceKernelWritev(int d, const KernelIovec* iov, int iovcnt) {
     }
     const auto sharedResult = File::WritevSharedMemory_nid_no_patch(d, NativeIovecs(iov), iovcnt);
     if (sharedResult != -2) return sharedResult < 0 ? SceErrorFromErrno(errno) : sharedResult;
+#if defined(__APPLE__)
+    if (iovcnt == 0) return 0;
+#endif
     const auto result = static_cast<std::int64_t>(::writev(d, NativeIovecs(iov), iovcnt));
     return result < 0 ? SceErrorFromErrno(errno) : result;
 }

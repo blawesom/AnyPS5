@@ -111,7 +111,7 @@ struct Frame {
     std::intptr_t dataAlign {};
     unsigned returnRegister {};
     bool signal {};
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     bool foreign {};
     _Unwind_Context caller {};
 #endif

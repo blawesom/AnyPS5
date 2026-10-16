@@ -454,6 +454,8 @@ int APS5_VABI fflush_nid_postfix(FileStream* stream) {
     std::FILE* native = stream ? GetNativeStream(stream) : nullptr;
 #ifdef __linux__
     if (native && !__fwriting(native)) return 0;
+#elif defined(__APPLE__)
+    if (native && (native->_flags & __SWR) == 0) return 0;
 #endif
     const int result = std::fflush(native);
     if (stream) stream->SyncStatus();

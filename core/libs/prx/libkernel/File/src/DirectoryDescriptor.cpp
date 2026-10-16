@@ -164,14 +164,25 @@ int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
 
 #else
 
+#include <fcntl.h>
+#if defined(__APPLE__)
+#include <sys/param.h>
+#endif
+
 namespace File {
 
 std::optional<std::filesystem::path> DirectoryDescriptorPath(int fd) {
     if (fd < 0) return std::nullopt;
     std::error_code error;
+#if defined(__APPLE__)
+    char resolved[MAXPATHLEN] = {};
+    if (::fcntl(fd, F_GETPATH, resolved) != 0) return std::nullopt;
+    const std::filesystem::path target(resolved);
+#else
     const auto link = std::filesystem::path("/proc/self/fd") / std::to_string(fd);
     const auto target = std::filesystem::read_symlink(link, error);
     if (error) return std::nullopt;
+#endif
     if (!std::filesystem::is_directory(target, error)) return std::nullopt;
     return target;
 }

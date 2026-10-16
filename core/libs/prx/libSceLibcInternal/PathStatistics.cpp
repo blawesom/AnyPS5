@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <io.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -100,7 +101,18 @@ int OpenMetadata(const std::filesystem::path& path, bool directory) {
     }
     return descriptor;
 #else
+#if defined(__APPLE__)
+    int descriptor = ::open(path.c_str(), O_EVTONLY | O_NONBLOCK | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
+    if (descriptor < 0 && errno == EACCES) descriptor = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
+    if (descriptor < 0 && (errno == EACCES || errno == EOPNOTSUPP || errno == ENXIO) && !directory) {
+        struct stat info{};
+        if (::stat(path.c_str(), &info) != 0) return Fail(HostError(errno));
+        descriptor = S_ISDIR(info.st_mode) ? -1 : ::open(path.parent_path().c_str(), O_EVTONLY | O_CLOEXEC | O_DIRECTORY);
+        if (descriptor < 0) errno = EACCES;
+    }
+#else
     const int descriptor = ::open(path.c_str(), O_PATH | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
+#endif
     return descriptor < 0 ? Fail(HostError(errno)) : descriptor;
 #endif
 }

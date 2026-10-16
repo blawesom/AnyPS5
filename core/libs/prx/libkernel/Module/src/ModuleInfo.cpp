@@ -1,3 +1,6 @@
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -22,7 +25,11 @@
 #include <filesystem>
 #else
 #include <dlfcn.h>
+#if defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#else
 #include <link.h>
+#endif
 #include <mutex>
 #include <unistd.h>
 #include <unordered_map>
@@ -110,10 +117,17 @@ EhFrame::Tables FrameTables(const dl_phdr_info& image, std::uintptr_t header) {
 std::string ImageName(const dl_phdr_info& image) {
     std::string path = image.dlpi_name ? image.dlpi_name : "";
     if (path.empty()) {
+#if defined(__APPLE__)
+        char executable[4096];
+        std::uint32_t capacity = sizeof(executable);
+        if (_NSGetExecutablePath(executable, &capacity) != 0) throw std::runtime_error("sceKernelGetModuleInfoFromAddr: cannot resolve the executable path");
+        path.assign(executable);
+#else
         char executable[4096];
         const auto length = ::readlink("/proc/self/exe", executable, sizeof(executable) - 1);
         if (length < 0) throw std::runtime_error("sceKernelGetModuleInfoFromAddr: cannot resolve the executable path");
         path.assign(executable, static_cast<std::size_t>(length));
+#endif
     }
     return ModuleName(path.substr(path.find_last_of('/') + 1));
 }

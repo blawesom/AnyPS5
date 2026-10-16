@@ -29,6 +29,10 @@
 #include <sys/times.h>
 #include <unistd.h>
 #endif
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <pthread.h>
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 
@@ -348,6 +352,18 @@ static std::uint64_t ProcessCpuResolutionNanos() {
 }
 #endif
 
+#if defined(__APPLE__)
+static std::uint64_t CallingThreadCpuNanos() {
+    thread_basic_info_data_t info{};
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    const kern_return_t result = thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count);
+    if (result != KERN_SUCCESS)
+        throw std::runtime_error("clock_gettime: thread_info failed with " + std::to_string(result));
+    const auto toNanos = [](const time_value_t& value) { return static_cast<std::uint64_t>(value.seconds) * 1000000000ULL + static_cast<std::uint64_t>(value.microseconds) * 1000ULL; };
+    return toNanos(info.user_time) + toNanos(info.system_time);
+}
+#endif
+
 int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp) {
     if (tp == nullptr) {
         APS5_INVALID_ARG_EX;
@@ -403,6 +419,14 @@ int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp) {
     }
     throw std::runtime_error(std::string(__func__) + ": unsupported clock_id " + std::to_string(clockId));
 #else
+#if defined(__APPLE__)
+    if (clockId == GUEST_CLOCK_THREAD_CPUTIME_ID) {
+        const std::uint64_t nanos = CallingThreadCpuNanos();
+        tp->tv_sec = static_cast<std::int64_t>(nanos / 1000000000ULL);
+        tp->tv_nsec = static_cast<std::int64_t>(nanos % 1000000000ULL);
+        return 0;
+    }
+#endif
     clockid_t nativeId;
     switch (clockId) {
         case 0:

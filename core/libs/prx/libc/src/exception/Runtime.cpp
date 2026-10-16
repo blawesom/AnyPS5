@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <limits>
 #ifdef _WIN32
 #include <windows.h>
@@ -89,6 +91,31 @@ inline std::atomic<void(*)()> terminateHandler {DefaultTerminate};
     std::abort();
 }
 [[noreturn]] void Terminate() { InvokeTerminate(terminateHandler.load(std::memory_order_acquire)); }
+#if defined(__APPLE__)
+[[noreturn]] static void HostTerminate() {
+    const auto handler = terminateHandler.load(std::memory_order_acquire);
+    if (handler != DefaultTerminate) InvokeTerminate(handler);
+    if (const auto current = std::current_exception()) {
+        try {
+            std::rethrow_exception(current);
+        } catch (const std::exception& error) {
+            int status = 0;
+            char* demangled = abi::__cxa_demangle(typeid(error).name(), nullptr, nullptr, &status);
+            RawLog("terminate called after throwing an instance of '%s'\n  what():  ", status == 0 && demangled ? demangled : typeid(error).name());
+            std::free(demangled);
+            const char* what = error.what();
+            RawWrite(what, std::strlen(what));
+            RawWrite("\n", 1);
+        } catch (...) {
+            RawLog("terminate called after throwing a foreign exception\n");
+        }
+    } else {
+        RawLog("terminate called without an active exception\n");
+    }
+    std::abort();
+}
+[[maybe_unused]] static const bool hostTerminateInstalled = (std::set_terminate(HostTerminate), true);
+#endif
 
 _Unwind_Exception* UnwindOf(Header* header) {
     return Native(header->unwind.exception_class) ? &header->unwind : reinterpret_cast<_Unwind_Exception*>(header->landing);

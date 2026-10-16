@@ -15,6 +15,10 @@
 #ifdef __linux__
 #include <netpacket/packet.h>
 #endif
+#ifdef __APPLE__
+#include <net/if_dl.h>
+#include <sys/sysctl.h>
+#endif
 #endif
 #include <cstdint>
 #include <cstddef>
@@ -164,6 +168,43 @@ struct HostDefaultRoute {
     unsigned long metric = 0;
 };
 
+#if defined(__APPLE__)
+static std::vector<HostDefaultRoute> HostDefaultRoutes() {
+    int request[6] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_GATEWAY};
+    std::size_t needed = 0;
+    if (sysctl(request, 6, nullptr, &needed, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable");
+    std::vector<char> table(needed);
+    if (needed != 0 && sysctl(request, 6, table.data(), &needed, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable");
+    const auto rounded = [](std::size_t length) { return length > 0 ? 1 + ((length - 1) | (sizeof(std::uint32_t) - 1)) : sizeof(std::uint32_t); };
+    std::vector<HostDefaultRoute> routes;
+    for (std::size_t offset = 0; offset + sizeof(rt_msghdr) <= needed;) {
+        const auto* header = reinterpret_cast<const rt_msghdr*>(table.data() + offset);
+        if (header->rtm_msglen == 0) break;
+        offset += header->rtm_msglen;
+        if (!(header->rtm_flags & RTF_UP) || (header->rtm_flags & RTF_REJECT)) continue;
+        const sockaddr* addresses[RTAX_MAX] = {};
+        const auto* cursor = reinterpret_cast<const char*>(header + 1);
+        for (int index = 0; index < RTAX_MAX; ++index) {
+            if (!(header->rtm_addrs & (1 << index))) continue;
+            addresses[index] = reinterpret_cast<const sockaddr*>(cursor);
+            cursor += rounded(addresses[index]->sa_len);
+        }
+        const auto* destination = addresses[RTAX_DST];
+        const auto* gateway = addresses[RTAX_GATEWAY];
+        const auto* mask = addresses[RTAX_NETMASK];
+        if (!destination || destination->sa_family != AF_INET || reinterpret_cast<const sockaddr_in*>(destination)->sin_addr.s_addr != 0) continue;
+        if (mask && mask->sa_len > offsetof(sockaddr_in, sin_addr) && reinterpret_cast<const sockaddr_in*>(mask)->sin_addr.s_addr != 0) continue;
+        if (!gateway || gateway->sa_family != AF_INET) continue;
+        char name[IF_NAMESIZE] = {};
+        if (!if_indextoname(header->rtm_index, name)) continue;
+        HostDefaultRoute route;
+        route.name = name;
+        route.gateway = reinterpret_cast<const sockaddr_in*>(gateway)->sin_addr;
+        routes.push_back(route);
+    }
+    return routes;
+}
+#else
 static std::vector<HostDefaultRoute> HostDefaultRoutes() {
     std::ifstream table("/proc/net/route");
     if (!table) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable");
@@ -186,6 +227,7 @@ static std::vector<HostDefaultRoute> HostDefaultRoutes() {
     }
     return routes;
 }
+#endif
 
 static std::uint32_t HostInterfaceMtu(const char* name) {
     const int descriptor = socket(AF_INET, SOCK_DGRAM, 0);
@@ -314,6 +356,17 @@ static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
         const std::string statistics = std::string("/sys/class/net/") + item->ifa_name + "/statistics/";
         sent += NetCtlReadByteCounter_nid_no_patch((statistics + "tx_bytes").c_str());
         received += NetCtlReadByteCounter_nid_no_patch((statistics + "rx_bytes").c_str());
+    }
+    freeifaddrs(interfaces);
+#elif defined(__APPLE__)
+    ifaddrs* interfaces = nullptr;
+    if (getifaddrs(&interfaces) != 0) throw std::runtime_error("sceNetCtlGetIfStat: the host interface list is unavailable");
+    for (auto* item = interfaces; item; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_LINK || item->ifa_data == nullptr) continue;
+        if (!(item->ifa_flags & IFF_UP) || (item->ifa_flags & IFF_LOOPBACK)) continue;
+        const auto* data = static_cast<const if_data*>(item->ifa_data);
+        sent += data->ifi_obytes;
+        received += data->ifi_ibytes;
     }
     freeifaddrs(interfaces);
 #else

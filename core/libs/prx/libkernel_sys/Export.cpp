@@ -10,7 +10,7 @@
 #include <string_view>
 #include <system_error>
 #include <sys/stat.h>
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -205,6 +205,9 @@ int RenamePath(const std::filesystem::path& source, const std::filesystem::path&
         error.clear();
         sameFile = fs::equivalent(source, destination, error);
         if (error == std::errc::no_such_file_or_directory) error.clear();
+#if defined(__APPLE__)
+        if (error == std::errc::not_supported) error.clear();
+#endif
         if (error) return FilesystemError(error);
         if (!sameFile && sourceIsDirectory && !destinationIsDirectory) return GuestEnotdir;
         if (!sameFile && !sourceIsDirectory && destinationIsDirectory) return GuestEisdir;

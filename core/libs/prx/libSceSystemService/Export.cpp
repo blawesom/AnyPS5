@@ -17,6 +17,9 @@
 #include <windows.h>
 #elif defined(__linux__)
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <unistd.h>
 #endif
 #include "prx/libc/include/Shutdown.hpp"
 #include "SceTypes.hpp"
@@ -179,7 +182,7 @@ void StartHostExecutable(HostLaunch& launch) {
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
 }
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 struct HostLaunch {
     std::string executable;
     std::vector<std::string> arguments;
@@ -187,8 +190,17 @@ struct HostLaunch {
 
 HostLaunch PrepareLaunch(const char* path, const char* const* arguments) {
     std::error_code error;
+#if defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size);
+    std::filesystem::path own;
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) own = std::filesystem::canonical(buffer.data(), error);
+    if (own.empty()) throw std::runtime_error("sceSystemServiceLoadExec: cannot locate the executable: " + error.message());
+#else
     const auto own = std::filesystem::read_symlink("/proc/self/exe", error);
     if (error) throw std::runtime_error("sceSystemServiceLoadExec: cannot read /proc/self/exe: " + error.message());
+#endif
     HostLaunch launch;
     if (std::strcmp(path, MainExecutable) == 0) {
         const char* main = std::getenv(MainExecutableVariable);
@@ -237,7 +249,7 @@ int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* argu
     if (!path || !*path) return SYSTEM_SERVICE_ERROR_PARAMETER;
     if (std::strcmp(path, "exit") == 0) LibcExitWithoutHandlers_nid_no_patch(0);
     auto launch = PrepareLaunch(path, arguments);
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
     LoadConvertedExecutable_nid_no_patch(std::filesystem::path(launch.executable), arguments);
 #endif
     LibcRunShutdown_nid_postfix();

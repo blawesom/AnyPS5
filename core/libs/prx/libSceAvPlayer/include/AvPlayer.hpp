@@ -4,6 +4,7 @@
 #ifndef CORE_LIBS_PRX_LIBSCEAVPLAYER_INCLUDE_AVPLAYER_HPP
 #define CORE_LIBS_PRX_LIBSCEAVPLAYER_INCLUDE_AVPLAYER_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -157,6 +158,9 @@ private:
     std::deque<Event> events;
     bool quit = false;
     std::shared_ptr<bool> controllerClosed = std::make_shared<bool>(false);
+#if defined(__APPLE__)
+    std::atomic<bool> endSeen{false};
+#endif
     std::thread controller;
 };
 

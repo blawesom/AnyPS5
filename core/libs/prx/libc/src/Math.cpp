@@ -214,7 +214,11 @@ float APS5_VABI acosf_nid_postfix(float x) {
         return std::bit_cast<float>(0xffc00000u);
     }
     const int saved_errno = errno;
+#if defined(__APPLE__)
+    const float result = static_cast<float>(std::acos(static_cast<double>(x)));
+#else
     const float result = std::acos(x);
+#endif
     errno = saved_errno;
     return result;
 }

@@ -44,6 +44,15 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#if defined(__APPLE__) && !defined(MSG_NOSIGNAL)
+#define MSG_NOSIGNAL 0
+#endif
+#if defined(__APPLE__) && !defined(POLLRDHUP)
+#define POLLRDHUP 0
+#endif
+#if defined(__APPLE__) && !defined(SO_NREAD)
+#define SO_NREAD 0x1020
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 namespace {
@@ -101,6 +110,25 @@ int SendError(int type) {
 #endif
     return NativeError();
 }
+#if defined(__APPLE__)
+std::mutex urgentMutex;
+std::set<int> urgentHeld;
+void ForgetUrgent(int value) {
+    std::lock_guard lock(urgentMutex);
+    urgentHeld.erase(value);
+}
+bool UrgentPending(int value) {
+    {
+        std::lock_guard lock(urgentMutex);
+        if (urgentHeld.contains(value)) return true;
+    }
+    char byte;
+    if (::recv(value, &byte, 1, MSG_OOB | MSG_PEEK) != 1) return false;
+    std::lock_guard lock(urgentMutex);
+    urgentHeld.insert(value);
+    return true;
+}
+#endif
 struct Socket {
     NativeSocket value;
     int family;
@@ -112,6 +140,9 @@ struct Socket {
     Socket(NativeSocket value, int family, int type) : value(value), family(family), type(type) {}
     ~Socket() {
         if (value == Invalid) return;
+#if defined(__APPLE__)
+        ForgetUrgent(value);
+#endif
 #ifdef _WIN32
         closesocket(value);
 #else
@@ -244,6 +275,26 @@ bool Address(const void* input, std::uint32_t length, sockaddr_storage& native, 
     Fail(47);
     return false;
 }
+#if defined(__APPLE__)
+bool IsPeer(NativeSocket value, const sockaddr_storage& address) {
+    sockaddr_storage peer{};
+    socklen_t size = sizeof(peer);
+    if (::getpeername(value, reinterpret_cast<sockaddr*>(&peer), &size) != 0 || peer.ss_family != address.ss_family) return false;
+    if (address.ss_family == AF_INET) {
+        const auto& left = reinterpret_cast<const sockaddr_in&>(peer);
+        const auto& right = reinterpret_cast<const sockaddr_in&>(address);
+        return left.sin_port == right.sin_port && left.sin_addr.s_addr == right.sin_addr.s_addr;
+    }
+    const auto& left = reinterpret_cast<const sockaddr_in6&>(peer);
+    const auto& right = reinterpret_cast<const sockaddr_in6&>(address);
+    return left.sin6_port == right.sin6_port && std::memcmp(&left.sin6_addr, &right.sin6_addr, sizeof(left.sin6_addr)) == 0;
+}
+bool HasPeer(NativeSocket value) {
+    sockaddr_storage peer{};
+    socklen_t size = sizeof(peer);
+    return ::getpeername(value, reinterpret_cast<sockaddr*>(&peer), &size) == 0;
+}
+#endif
 std::uint16_t& PortOf(sockaddr_storage& address) {
     return address.ss_family == AF_INET ? reinterpret_cast<sockaddr_in&>(address).sin_port : reinterpret_cast<sockaddr_in6&>(address).sin6_port;
 }
@@ -266,7 +317,16 @@ int Disconnect(const Socket& socket) {
 #else
     sockaddr unspecified{};
     unspecified.sa_family = AF_UNSPEC;
+#if defined(__APPLE__)
+    if (::connect(socket.value, &unspecified, sizeof(unspecified)) != 0) {
+        const int error = NativeError();
+        sockaddr_storage remaining{};
+        socklen_t remainingSize = sizeof(remaining);
+        if (::getpeername(socket.value, reinterpret_cast<sockaddr*>(&remaining), &remainingSize) == 0 || errno != ENOTCONN) return Fail(error);
+    }
+#else
     if (::connect(socket.value, &unspecified, sizeof(unspecified)) != 0) return Fail(NativeError());
+#endif
 #endif
     sockaddr_storage current{};
     socklen_t currentSize = sizeof(current);
@@ -382,6 +442,11 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     if (pipes && (timeout < 0 || timeout > 1)) timeout = 1;
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
+#elif defined(__APPLE__)
+    int timeout = -1;
+    if (deadlineNanos != 0) timeout = static_cast<int>(std::min<std::uint64_t>((remaining + 999999) / 1000000, INT_MAX));
+    if (::poll(entries.data(), static_cast<nfds_t>(entries.size()), timeout) < 0 && errno != EINTR)
+        throw std::runtime_error("equeue wait: poll failed, guest errno " + std::to_string(NativeError()));
 #else
     timespec timeout{static_cast<time_t>(remaining / 1000000000), static_cast<long>(remaining % 1000000000)};
     if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
@@ -667,9 +732,22 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
 }
 #else
 int NativePair(int type, NativeSocket (&pair)[2]) {
+#if defined(__APPLE__)
+    const int nativeType = type == 1 ? SOCK_STREAM : SOCK_DGRAM;
+#else
     const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
+#endif
     int native[2];
     if (::socketpair(AF_UNIX, nativeType, 0, native)) return NativeError();
+#if defined(__APPLE__)
+    if (type == 5) {
+        const int buffer = 65536;
+        for (const int end : native) {
+            ::setsockopt(end, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
+            ::setsockopt(end, SOL_SOCKET, SO_RCVBUF, &buffer, sizeof(buffer));
+        }
+    }
+#endif
     pair[0] = native[0];
     pair[1] = native[1];
     return 0;
@@ -1082,7 +1160,16 @@ int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
     if (!socket) return Fail(9);
     if (how < 0 || how > 2) return Fail(22);
+#if defined(__APPLE__)
+    if (::shutdown(socket->value, how)) {
+        const bool unconnected = errno == ENOTCONN;
+        const int error = NativeError();
+        if (!unconnected || how == 1 || !HasPeer(socket->value)) return Fail(error);
+        if (how == 2 && ::shutdown(socket->value, SHUT_WR)) return Fail(NativeError());
+    }
+#else
     if (::shutdown(socket->value, how)) return Fail(NativeError());
+#endif
     std::lock_guard lock(socket->modeMutex);
     if (how != 1) socket->receiveShut = true;
     if (how != 0) socket->sendShut = true;
@@ -1131,7 +1218,14 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
     const auto result = ioctlsocket(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &value);
 #else
     int nativeValue = static_cast<int>(value);
+#if defined(__APPLE__)
+    socklen_t nativeSize = sizeof(nativeValue);
+    const auto result = request == 0x4004667f && socket->type != 1
+        ? ::getsockopt(socket->value, SOL_SOCKET, SO_NREAD, &nativeValue, &nativeSize)
+        : ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
+#else
     const auto result = ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
+#endif
     value = static_cast<unsigned long>(nativeValue);
 #endif
     if (result) return Fail(NativeError());
@@ -1161,6 +1255,10 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags),
             reinterpret_cast<sockaddr*>(&native), size));
+#if defined(__APPLE__)
+        if (result < 0 && errno == EISCONN && socket->type == 2 && IsPeer(socket->value, native))
+            result = static_cast<int>(::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags)));
+#endif
     }
     return result < 0 ? Fail(SendError(socket->type)) : result;
 }
@@ -1472,6 +1570,50 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
             return ready;
         }
     }
+#elif defined(__APPLE__)
+    bool priority = false;
+    for (std::size_t i = 0; i < socketCount; ++i)
+        if (native[i].events & (NativePollPriority | POLLRDBAND)) priority = true;
+    if (!priority) {
+        const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), ready ? 0 : timeout);
+        if (result < 0) return Fail(NativeError());
+        for (std::size_t i = 0; i < native.size(); ++i) collect(i, i >= socketCount);
+        return ready;
+    }
+    const auto urgent = [&] {
+        bool found = false;
+        for (std::size_t i = 0; i < socketCount; ++i) {
+            const short wanted = static_cast<short>(native[i].events & (NativePollPriority | POLLRDBAND));
+            if (!wanted) continue;
+            char byte;
+            if (!UrgentPending(native[i].fd)) continue;
+            native[i].revents = static_cast<short>(native[i].revents | wanted);
+            found = true;
+            if ((native[i].revents & (POLLIN | POLLRDNORM)) && !(native[i].revents & POLLHUP) &&
+                ::recv(native[i].fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT) < 0)
+                native[i].revents = static_cast<short>(native[i].revents & ~(POLLIN | POLLRDNORM));
+        }
+        return found;
+    };
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout < 0 ? 0 : timeout);
+    for (;;) {
+        int slice = 0;
+        if (!ready) {
+            if (timeout < 0) slice = 10;
+            else {
+                const auto left = std::chrono::ceil<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+                slice = static_cast<int>(std::clamp<long long>(left, 0, 10));
+            }
+        }
+        for (auto& request : native) request.revents = 0;
+        const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), slice);
+        if (result < 0 && errno != EINTR) return Fail(NativeError());
+        const bool oob = urgent();
+        const bool expired = timeout >= 0 && std::chrono::steady_clock::now() >= deadline;
+        if (ready || result > 0 || oob || expired) break;
+    }
+    for (std::size_t i = 0; i < native.size(); ++i) collect(i, i >= socketCount);
+    return ready;
 #else
     const int wait = ready ? 0 : timeout;
     const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), wait);

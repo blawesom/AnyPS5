@@ -36,6 +36,9 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
+#if defined(__APPLE__) && !defined(MSG_NOSIGNAL)
+#define MSG_NOSIGNAL 0
+#endif
 
 // Guest socket descriptors retain PS5 semantics while their transport is backed by host sockets.
 
@@ -1566,6 +1569,20 @@ int lookup_host(int rid, const char* hostname, const char* func, int family, std
     if (!initialize_sockets()) return fail(5);
     std::uint64_t generation = 0;
     if (const int error = begin_lookup(rid, &Resolver::abort_ntoa, generation)) return error;
+#if defined(__APPLE__)
+    if (family == AF_INET6) {
+        addrinfo numeric{};
+        numeric.ai_family = AF_INET;
+        numeric.ai_flags = AI_NUMERICHOST;
+        addrinfo* literal = nullptr;
+        if (::getaddrinfo(hostname, nullptr, &numeric, &literal) == 0) {
+            ::freeaddrinfo(literal);
+            set_errno(NET_ENOENT);
+            log_soft(func, "host DNS lookup failed");
+            return end_lookup(rid, generation, NET_ERROR_RESOLVER_ENODNS);
+        }
+    }
+#endif
     addrinfo hints{};
     hints.ai_family = family;
     addrinfo* results = nullptr;
