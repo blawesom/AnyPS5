@@ -121,6 +121,22 @@ void Run(AgcDriver::VulkanDevice& device, bool layered, bool registration, std::
             for (std::uint32_t component = 0; component < 4u; ++component) Require(Output[lane * 4u + component] == expected[component], "FMASK load did not read its mapping: round " + std::to_string(round) + ", lane " + std::to_string(lane) + ", component " + std::to_string(component));
         }
         Require(std::all_of(Output.begin() + Threads * 4u, Output.end(), [](auto value) { return value == Sentinel; }), "FMASK load wrote outside its output");
+        if (round == 3u) {
+            auto compressed = Image(layered, pipeXor);
+            compressed[6] = 1u << 21u;
+            Output.fill(Sentinel);
+            bool rejected = false;
+            try {
+                const auto invalid = Compile(device, code, compressed, registration);
+                device.Dispatch(invalid, 1u, 1u, 1u);
+                device.WaitIdle();
+            } catch (const std::runtime_error& error) {
+                Require(std::string(error.what()).find("FMASK CMASK compression is not implemented") != std::string::npos, "compressed FMASK failed for another reason: " + std::string(error.what()));
+                rejected = true;
+            }
+            Require(rejected, "a cached FMASK shader accepted compression without decoding CMASK");
+            Require(std::all_of(Output.begin(), Output.end(), [](auto value) { return value == Sentinel; }), "the rejected compressed FMASK load wrote output");
+        }
     }
 }
 
@@ -135,7 +151,7 @@ int main() {
                 for (const auto pipeXor : {0u, 0xf00u}) Run(*device, layered, registration, pipeXor);
             }
         }
-        std::cout << "FMASK image reads passed: 40 dispatches, 5120 component checks\n";
+        std::cout << "FMASK image reads passed: 40 dispatches, 5120 component checks, 8 compression refusals\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
