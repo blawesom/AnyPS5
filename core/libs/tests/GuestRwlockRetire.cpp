@@ -17,10 +17,12 @@ static void CheckHandoff(bool write) {
             phase.wait(0);
             auto slot = published;
             phase.store(2);
+            phase.notify_one();
             for (;;) {
                 const int result = scePthreadRwlockTrywrlock(&slot);
                 if (result == 0) break;
                 Require(result == static_cast<int>(0x80020010u));
+                std::this_thread::yield();
             }
             Require(scePthreadRwlockUnlock(&slot) == 0);
             Require(scePthreadRwlockDestroy(&slot) == 0);
@@ -36,7 +38,7 @@ static void CheckHandoff(bool write) {
         published = slot;
         phase.store(1);
         phase.notify_one();
-        while (phase.load() == 1) {}
+        phase.wait(1);
         Require(scePthreadRwlockUnlock(&slot) == 0);
         while (phase.load() != 3) phase.wait(2);
         phase.store(0);
