@@ -48,6 +48,8 @@ int APS5_VABI sceNetSocketClose(int);
 
 namespace {
 
+constexpr int ParallelConnections = 4;
+
 void Require(bool condition, const char* message) {
     if (condition) return;
     std::fprintf(stderr, "%s\n", message);
@@ -193,6 +195,7 @@ int main(int argc, char** argv) {
     std::thread serving([&] {
         server.Serve(false);
         server.Serve(true);
+        for (int index = 0; index < ParallelConnections; ++index) server.Serve(true);
     });
 
     const int empty = sceSslInit_nid_postfix(256 * 1024);
@@ -200,7 +203,7 @@ int main(int argc, char** argv) {
     Require(Throws([&] { sceSslConnect(withoutAuthority); }), "a handshake without a loaded CA was attempted");
     Require(sceSslDeleteConnection(withoutAuthority) == 0 && sceSslTerm_nid_postfix(empty) == 0, "release the context without CA");
 
-    const int context = sceSslInit_nid_postfix(256 * 1024);
+    const int context = sceSslInit_nid_postfix(1024 * 1024);
     std::string root = RootPem;
     SceSsl::Data authority{reinterpret_cast<std::uint8_t*>(root.data()), root.size()};
     auto* authorities = &authority;
@@ -242,6 +245,22 @@ int main(int argc, char** argv) {
     Require(sceSslDeleteConnection(connection) == 0, "delete the connection");
     Require(InUse(context) == loaded, "the connection's pool memory was not returned");
     Require(sockets.Close(descriptor) == 0, "the socket did not stay open after the connection was deleted");
+
+    std::array<std::thread, ParallelConnections> clients;
+    for (auto& client : clients) {
+        client = std::thread([&] {
+            const int parallelSocket = sockets.Open(server.port);
+            const int parallel = sceSslCreateConnection(context, parallelSocket, "localhost");
+            std::array<char, 16> reply{};
+            char ping[] = "ping";
+            Require(sceSslConnect(parallel) == 0 && sceSslWrite(parallel, ping, 4, 0) == 4, "parallel handshake or write");
+            Require(sceSslRead(parallel, reply.data(), reply.size(), 0) == 4 && std::memcmp(reply.data(), "pong", 4) == 0, "parallel reply");
+            Require(sceSslRead(parallel, reply.data(), reply.size(), 0) == 0, "parallel end of stream");
+            Require(sceSslDeleteConnection(parallel) == 0 && sockets.Close(parallelSocket) == 0, "release parallel connection");
+        });
+    }
+    for (auto& client : clients) client.join();
+    Require(InUse(context) == loaded, "parallel connections did not return their pool memory");
 
     serving.join();
     Require(server.failure.empty(), server.failure.c_str());

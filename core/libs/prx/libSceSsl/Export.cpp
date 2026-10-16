@@ -187,7 +187,7 @@ struct Context {
     std::unordered_map<void*, Snapshot> caLists;
     std::unordered_map<void*, Snapshot> caCerts;
     std::unordered_map<void*, std::unique_ptr<CertName>> certNames;
-    explicit Context(std::size_t size) : pool{size} {}
+    explicit Context(std::size_t size) : pool{size, 0, 0, {}} {}
 };
 
 int HostError() {
