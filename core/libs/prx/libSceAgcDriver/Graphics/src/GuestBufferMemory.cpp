@@ -2211,6 +2211,22 @@ void appendChangedBlocks(std::span<ImageMirror* const> mirrors, std::uint64_t ge
     }
 }
 
+void appendHeapRun(std::span<ImageMirror* const> mirrors, std::uint64_t generation, std::vector<RefreshBlock>& blocks) {
+    if (generation != 0) {
+        appendChangedBlocks(mirrors, generation, blocks);
+        return;
+    }
+    for (std::size_t index = 0; index < mirrors.size(); ++index) {
+        auto& mirror = *mirrors[index];
+        const auto own = GuestMemory::CollectWrites(mirror.base, static_cast<std::size_t>(mirror.bytes));
+        if (own == 0) {
+            ++Mirrors().heapUnwatched;
+            std::fill(mirror.generations.begin(), mirror.generations.end(), 0);
+        }
+        appendChangedBlocks(mirrors.subspan(index, 1), own, blocks);
+    }
+}
+
 void refreshHeapMirrors(std::vector<ImageMirror*>& mirrors, std::vector<RefreshBlock>& blocks) {
     std::sort(mirrors.begin(), mirrors.end(), [](const ImageMirror* left, const ImageMirror* right) { return left->base < right->base; });
     for (std::size_t first = 0; first < mirrors.size();) {
@@ -2220,8 +2236,7 @@ void refreshHeapMirrors(std::vector<ImageMirror*>& mirrors, std::vector<RefreshB
         const auto bytes = mirrors[last - 1]->base + mirrors[last - 1]->bytes - begin;
         prepareRange(begin, bytes);
         const auto generation = GuestMemory::CollectWrites(begin, static_cast<std::size_t>(bytes));
-        Require(generation != 0, "a heap mirror's range is no longer write-watched");
-        appendChangedBlocks(std::span<ImageMirror* const>(mirrors).subspan(first, last - first), generation, blocks);
+        appendHeapRun(std::span<ImageMirror* const>(mirrors).subspan(first, last - first), generation, blocks);
         first = last;
     }
 }
@@ -2357,9 +2372,8 @@ std::vector<std::pair<std::size_t, std::uint64_t>> refreshHeapRuns(const GuestBu
         const auto& run = space.heapRuns[index];
         prepareRange(run.begin, run.bytes);
         const auto generation = GuestMemory::CollectWrites(run.begin, static_cast<std::size_t>(run.bytes));
-        Require(generation != 0, "a heap mirror's range is no longer write-watched");
         const auto since = space.verified[index].load(std::memory_order_relaxed);
-        if (since == 0 || !GuestMemory::UnchangedSince(run.begin, static_cast<std::size_t>(run.bytes), since)) appendChangedBlocks(std::span<ImageMirror* const>(space.heapMirrors).subspan(run.first, run.last - run.first), generation, blocks);
+        if (since == 0 || !GuestMemory::UnchangedSince(run.begin, static_cast<std::size_t>(run.bytes), since)) appendHeapRun(std::span<ImageMirror* const>(space.heapMirrors).subspan(run.first, run.last - run.first), generation, blocks);
         checked.emplace_back(index, generation);
     }
     return checked;
