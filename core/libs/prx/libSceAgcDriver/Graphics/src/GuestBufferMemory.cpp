@@ -2322,7 +2322,7 @@ bool refreshSparseMirror(ImageMirror& mirror, std::vector<RefreshBlock>& blocks)
     if (!pieces.empty() && pieces.back().second > mirror.base + mirror.bytes) return false;
     syncRange(mirror.base, mirror.bytes);
     const auto generation = collectPieces(pieces);
-    Require(generation != 0, "a sparse heap mirror's range is no longer write-watched");
+    if (generation == 0) return false;
     appendSparseBlocks(mirror, std::move(pieces), generation, blocks);
     return true;
 }

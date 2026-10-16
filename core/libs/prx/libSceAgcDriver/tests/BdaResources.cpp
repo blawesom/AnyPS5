@@ -1978,6 +1978,71 @@ void RunHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess& acce
     std::cout << (throughImport ? "an address-based build plans a heap again once a host import took its mirror's range off the write watch\n" : "an address-based build plans a heap again once its mirror's range has left the write watch\n");
 }
 
+void RunSparseHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess& access) {
+    constexpr std::size_t block = 65536;
+    constexpr std::size_t reserved = 16 * block;
+    constexpr std::size_t committed = 4 * block;
+#ifdef _WIN32
+    if (!GuestArena::GuestArenaAvailable_nid_postfix() || !GuestArena::GuestArenaWriteWatched_nid_postfix()) {
+        std::cout << "guest arena unavailable or not write-watched: sparse heap mirrors leaving the write watch not tested\n";
+        return;
+    }
+    auto* guest = static_cast<std::byte*>(GuestArena::GuestArenaAllocate_nid_postfix(reserved, block));
+    Require(guest != nullptr, "cannot allocate the sparse heap in the guest arena");
+    GuestArena::GuestArenaCommit_nid_postfix(guest, committed, PAGE_READWRITE, block);
+#else
+    if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) {
+        std::cout << "write watch unavailable: sparse heap mirrors leaving the write watch not tested\n";
+        return;
+    }
+    auto* guest = reserveSparse(reserved, committed);
+    GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(guest, reserved);
+#endif
+    std::memset(guest, 0x5a, committed);
+    const auto base = reinterpret_cast<std::uintptr_t>(guest);
+    const auto registry = [&](bool add) {
+        auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+        if (add) GuestAllocations::GuestAllocationsAdd_nid_postfix(mutation, guest, reserved, true, false, true);
+        else GuestAllocations::GuestAllocationsRemove_nid_postfix(mutation, guest);
+        GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    };
+    registry(true);
+    Require(AgcDriver::GuestMemory::Watched(base, committed), "the sparse heap is not write-watched");
+    const auto before = MirrorCounters();
+    {
+        GuestBufferMemory leased(context);
+        leased.AcquireRegistered();
+        leased.Upload(true);
+        Require(MirrorCounters().heapMirrors == before.heapMirrors + 1, "the first build did not mirror the sparse heap");
+        leased.WriteBack();
+    }
+    AgcDriver::GuestMemory::Unwatch(base + block, block);
+    Require(!AgcDriver::GuestMemory::Watched(base, committed), "the sparse heap is still write-watched");
+    std::memset(guest + block, 0x6b, block);
+    {
+        GuestBufferMemory leased(context);
+        leased.AcquireRegistered();
+        leased.Upload(true);
+        Require(MirrorCounters().heapMirrors == before.heapMirrors, "the sparse heap mirror whose range left the write watch was kept");
+        const auto ranges = leased.AddressRanges();
+        const auto found = std::find_if(ranges.begin(), ranges.end(), [&](const auto& range) { return range.begin == base; });
+        Require(found != ranges.end() && found->deviceAddress != 0u, "the sparse heap is missing from the BDA table");
+        Require(access.addressBytes(found->deviceAddress)[block + 3] == std::byte{0x6b}, "the second build does not serve the sparse heap's new bytes");
+        leased.WriteBack();
+    }
+    registry(false);
+    ClearImageMirrors(context.device);
+    ClearSnapshotCopies(context.device);
+#ifdef _WIN32
+    GuestArena::GuestArenaReset_nid_postfix(guest, reserved);
+    GuestArena::GuestArenaRelease_nid_postfix(guest, reserved);
+#else
+    GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(guest, reserved);
+    releaseSparse(guest, reserved);
+#endif
+    std::cout << "an address-based build plans a sparse heap again once its mirror's range has left the write watch\n";
+}
+
 void hostWriteWatchExclusionTests() {
 #ifdef _WIN32
     std::vector<std::uint8_t> host(64, 0x31);
