@@ -77,7 +77,7 @@ int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) 
     if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
     if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
     if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
-int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent() {    g_status = COMMON_DIALOG_STATUS_FINISHED;
+    g_status = COMMON_DIALOG_STATUS_FINISHED;
     return 0;
 }
 

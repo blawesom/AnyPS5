@@ -100,9 +100,12 @@ int APS5_VABI sceCoredumpGetThreadContextInfo(void* threadContextInfo, size_t th
 int APS5_VABI sceCoredumpWriteUserString() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
-int APS5_VABI sceCoredumpConfigDumpMode() {
-    (void)threadContextInfo;
-    (void)threadContextInfoSize;}
+}
+
+int APS5_VABI sceCoredumpConfigDumpMode(uint32_t mode) {
+    (void)mode;
+    return 0;
+}
 
 int APS5_VABI sceCoredumpAttachUserMemoryFile(uint32_t userValue, const void* mem, size_t size) {
     (void)userValue;

@@ -10,16 +10,6 @@ int APS5_VABI sceAgcAcquireMemSetEngine() {
  return 0;
 }
 
-int APS5_VABI sceAgcDcbPushMarkerSpan() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
-}
-
-int APS5_VABI sceAgcDcbSetMarkerSpan() {
-int APS5_VABI sceAgcGetDefaultCxStateFlat() { NotImplemented_nid_no_patch(__func__);
- return 0;
-}
-
 int APS5_VABI sceAgcSetSemaphoreMemory() {
  NotImplemented_nid_no_patch(__func__);
  return 0;

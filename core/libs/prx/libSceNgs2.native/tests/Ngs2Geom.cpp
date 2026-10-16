@@ -195,7 +195,7 @@ static void TestDefaultApply() {
     Require(attribute.level[0] > 0.0f);
     std::memset(&attribute, 0x5a, sizeof(attribute));
     Require(sceNgs2GeomApply(&listener, &source, &attribute, 16) == SCE_NGS2_OK);
-    Require(attribute.pitch_ratio == 0.0f);
+    Require(attribute.pitch_ratio == 1.0f);
     Require(attribute.a3d_attrib.position.x == 0.0f && attribute.a3d_attrib.position.y == 0.0f && attribute.a3d_attrib.position.z == 0.0f);
     Require(attribute.level[0] == 0.0f);
     Require(sceNgs2GeomApply(&listener, &source, nullptr, 0) == SCE_NGS2_ERROR_INVALID_OUT_ADDRESS);

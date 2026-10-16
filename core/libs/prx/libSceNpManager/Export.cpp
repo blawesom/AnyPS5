@@ -240,7 +240,7 @@ int APS5_VABI sceNpUnregisterPremiumEventCallback(void) {
 
 int APS5_VABI sceNpGetUserIdByAccountId(uint64_t account_id, int* user_id) {
     if (account_id == 0 || !user_id) return SCE_NP_ERROR_INVALID_ARGUMENT;
-int APS5_VABI sceNpGetUserIdByAccountId() {    return SCE_NP_ERROR_SIGNED_OUT;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {

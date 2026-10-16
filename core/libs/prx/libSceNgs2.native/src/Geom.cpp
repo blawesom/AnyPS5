@@ -208,21 +208,10 @@ int Ngs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
     return SCE_NGS2_OK;
 }
 
-int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
-    if (listener == nullptr || source == nullptr) APS5_INVALID_ARG_EX;
-    if (out_attrib == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
-    (void)flags;
-    std::memset(out_attrib, 0, sizeof(*out_attrib));
-    out_attrib->pitch_ratio = 1.0f;
-    out_attrib->a3d_attrib.position = source->position;
-    out_attrib->a3d_attrib.volume = std::max(source->min_level, source->max_level);
-    const std::uint32_t channels = std::min(source->matrix_format == 0u ? 2u : source->matrix_format, 8u);
-    const float level = source->max_level > 0.0f ? source->max_level : 1.0f;
-    for (std::uint32_t channel = 0; channel < channels; channel++) {
-        out_attrib->level[static_cast<std::size_t>(channel) * 8 + channel] = level;
-    }
 int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source,
     Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
+    if (listener == nullptr || source == nullptr) APS5_INVALID_ARG_EX;
+    if (out_attrib == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     ValidateGeomApply(*listener, *source, flags);
     if (flags == 0) flags = GEOM_DEFAULT_FLAGS;
 
@@ -237,9 +226,9 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
     if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_A3D_ATTRIBUTE)) != 0) {
         attribute.a3d_attrib.position = local;
         attribute.a3d_attrib.volume = level;
-    if ((flags & GEOM_FLAG_VOLUME_MATRIX) != 0) {
     }
-    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_VOLUME_MATRIX)) != 0) {        const float angle = distance > 1e-6f ? std::atan2(local.x, local.z) * 180.0f / std::numbers::pi_v<float> : 0.0f;
+    if ((flags & (GEOM_FLAG_SOURCE_ANGLE | GEOM_FLAG_VOLUME_MATRIX)) != 0) {
+        const float angle = distance > 1e-6f ? std::atan2(local.x, local.z) * 180.0f / std::numbers::pi_v<float> : 0.0f;
         const float panDistance = distance > 1e-6f ? std::clamp(local.z / distance, -1.0f, 1.0f) : 1.0f;
         Ngs2PanWork pan{};
         Ngs2PanParam param{angle, panDistance, source->fbw_level, source->lfe_level};
@@ -261,5 +250,8 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
             for (std::uint32_t output = 0; output < outputChannels; output++) {
                 attribute.level[input * NGS2_MAX_CHANNELS + output] = panLevels[output] * level;
             }
-    *out_attrib = attribute;    return SCE_NGS2_OK;
+        }
+    }
+    *out_attrib = attribute;
+    return SCE_NGS2_OK;
 }
