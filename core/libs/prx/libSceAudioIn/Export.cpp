@@ -76,10 +76,10 @@ Port* find(int handle) {
     return port.used ? &port : nullptr;
 }
 
-int checkArguments(std::uint32_t type, std::uint32_t index, std::uint32_t len, std::uint32_t freq) {
+int checkArguments(std::uint32_t type, std::uint32_t index, std::uint32_t len, std::uint32_t freq, bool asyncLength = false) {
     if (type != 0 && type != 1) return AUDIO_IN_ERROR_INVALID_TYPE;
     if (index != 0) return AUDIO_IN_ERROR_INVALID_PARAM;
-    if (len != 128 && len != 256) return AUDIO_IN_ERROR_INVALID_SIZE;
+    if (asyncLength ? len == 0 || len > MAX_ASYNC_LEN : len != 128 && len != 256) return AUDIO_IN_ERROR_INVALID_SIZE;
     if (freq != 48000 && freq != 16000) return AUDIO_IN_ERROR_INVALID_FREQ;
     return 0;
 }
@@ -185,9 +185,7 @@ int32_t APS5_VABI sceAudioInHqOpen(int32_t user_id, uint32_t type, uint32_t inde
 
 int32_t APS5_VABI sceAudioInAsyncOpen(int32_t user_id, uint32_t type, uint32_t index, uint32_t len, uint32_t freq, uint32_t param) {
     (void)user_id;
-    const int error = checkArguments(type, index, len, freq);
-    if (error == AUDIO_IN_ERROR_INVALID_SIZE && len > 0 && len <= MAX_ASYNC_LEN) return openPort(len, freq, param, __func__);
-    if (error != 0) return error;
+    if (const int error = checkArguments(type, index, len, freq, true); error != 0) return error;
     return openPort(len, freq, param, __func__);
 }
 
