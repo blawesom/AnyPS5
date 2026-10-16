@@ -659,7 +659,11 @@ void CheckImportWindow() {
     Require(ChangedBlocks(base, 3 * Block, generations, changed, cpu), "the import window block is not tracked");
     Require(changed[0] == BlockUnchanged && UnchangedSince(base, Block, synced), "a page an import window resolved without changing its bytes reads as written");
     Require(changed[1] == BlockWritten && WrittenSince(base + Block, Block, synced) && cpu[1] == 1, "a store of new bytes within an import window was missed");
+#if defined(__APPLE__)
+    Require(changed[2] == BlockUnchanged && UnchangedSince(base + 2 * Block, Block, synced), "a block the import window did not touch reads as written");
+#else
     Require(changed[2] == BlockUnchanged && cpu[2] == 0, "a block the import window did not touch reads as written");
+#endif
     Require(cpu[0] == 1, "a page an import window resolved no longer counts as possibly touched by the CPU");
     const auto after = CollectWritesUncached(base, 3 * Block);
     bytes[0x100] = 0x33;

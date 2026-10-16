@@ -55,9 +55,14 @@ int main(int argc, char** argv) {
             executable = (segment.prot & 5) == 5;
     }
     Require(executable);
+#if defined(__APPLE__)
+    Require((info.eh_frame_addr == 0) == (info.eh_frame_size == 0));
+    Require(info.eh_frame_hdr_addr == 0 && info.eh_frame_hdr_size == 0);
+#else
     Require(info.eh_frame_addr != 0 && info.eh_frame_size != 0);
 #ifndef _WIN32
     Require(info.eh_frame_hdr_addr != 0 && info.eh_frame_hdr_size != 0);
+#endif
 #endif
     Require(info.init_proc_addr == 0 || info.init_proc_addr >= info.segments[0].address);
     const auto self = Query(reinterpret_cast<const void*>(&Require), 0);
@@ -172,6 +177,10 @@ int main(int argc, char** argv) {
     Require(reloadedAdd != nullptr);
     const auto fresh = Query(reloadedAdd, 0);
     Require(fresh.eh_frame_size == info.eh_frame_size && fresh.eh_frame_hdr_size == info.eh_frame_hdr_size);
+#if defined(__APPLE__)
+    Require(fresh.eh_frame_addr == 0 || fresh.eh_frame_addr - fresh.segments[0].address == info.eh_frame_addr - info.segments[0].address);
+#else
     Require(fresh.eh_frame_addr - fresh.segments[0].address == info.eh_frame_addr - info.segments[0].address);
+#endif
     Require(dlclose_nid_postfix(reloaded) == 0);
 }

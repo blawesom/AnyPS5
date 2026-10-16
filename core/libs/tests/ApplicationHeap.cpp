@@ -17,6 +17,8 @@
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #endif
 
 extern "C" {
@@ -97,6 +99,25 @@ void installProcessParameters() {
             const auto pageStart = reinterpret_cast<std::uintptr_t>(mutableHeader) & ~(pageSize - 1);
             const auto pageEnd = (reinterpret_cast<std::uintptr_t>(mutableHeader + 1) + pageSize - 1) & ~(pageSize - 1);
             if (mprotect(reinterpret_cast<void*>(pageStart), pageEnd - pageStart, PROT_READ | PROT_WRITE) != 0) return 1;
+            mutableHeader->p_type = 0x61000001;
+            mutableHeader->p_vaddr = reinterpret_cast<std::uintptr_t>(process.data()) - image->dlpi_addr;
+            mutableHeader->p_paddr = mutableHeader->p_vaddr;
+            mutableHeader->p_filesz = process.size();
+            mutableHeader->p_memsz = process.size();
+            *static_cast<bool*>(data) = true;
+            return 1;
+        }
+        return 1;
+    }, &installed);
+    require(installed);
+#elif defined(__APPLE__)
+    bool installed = false;
+    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+        if (image->dlpi_name != nullptr && image->dlpi_name[0] != '\0') return 0;
+        for (std::uint16_t index = image->dlpi_phnum; index-- > 0;) {
+            const auto& header = image->dlpi_phdr[index];
+            if (header.p_type != PT_LOAD || header.p_flags != PF_R) continue;
+            auto* mutableHeader = const_cast<Elf64_Phdr*>(&header);
             mutableHeader->p_type = 0x61000001;
             mutableHeader->p_vaddr = reinterpret_cast<std::uintptr_t>(process.data()) - image->dlpi_addr;
             mutableHeader->p_paddr = mutableHeader->p_vaddr;

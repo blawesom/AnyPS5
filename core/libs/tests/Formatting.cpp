@@ -1,3 +1,8 @@
+#if defined(__clang__) && !defined(_WIN32)
+#define __builtin_sysv_va_list __builtin_va_list
+#define __builtin_sysv_va_start __builtin_va_start
+#define __builtin_sysv_va_end __builtin_va_end
+#endif
 #include "SceTypes.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/GuestHeap.hpp"

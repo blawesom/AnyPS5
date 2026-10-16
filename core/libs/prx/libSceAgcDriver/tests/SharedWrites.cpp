@@ -1,3 +1,8 @@
+#if defined(__APPLE__)
+#define SharedWritesUsageScope RUSAGE_SELF
+#else
+#define SharedWritesUsageScope RUSAGE_THREAD
+#endif
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libc/include/GuestArena.hpp"
@@ -15,6 +20,14 @@
 #include <vector>
 #ifndef _WIN32
 #include <sys/resource.h>
+#endif
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <set>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 extern "C" {
@@ -65,7 +78,7 @@ void benchmark(bool labels = false, bool backing = true) {
         for (unsigned pass = 0; pass < 10; ++pass) {
 #ifndef _WIN32
             rusage before{}, after{};
-            getrusage(RUSAGE_THREAD, &before);
+            getrusage(SharedWritesUsageScope, &before);
 #endif
             const auto start = std::chrono::steady_clock::now();
             for (unsigned i = 0; i < 256; ++i) {
@@ -78,7 +91,7 @@ void benchmark(bool labels = false, bool backing = true) {
             }
             const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / 256;
 #ifndef _WIN32
-            getrusage(RUSAGE_THREAD, &after);
+            getrusage(SharedWritesUsageScope, &after);
             if (pass != 0) faults += after.ru_minflt - before.ru_minflt;
 #endif
             if (pass != 0) times.push_back(us);
@@ -191,7 +204,41 @@ template<class TAction> void fails(TAction&& fn) {
     require(failed, "invalid write was accepted");
 }
 
-#ifndef _WIN32
+#if defined(__APPLE__)
+template<class TVisit> void regionObjects(mach_vm_address_t address, mach_vm_address_t end, TVisit&& visit) {
+    while (address < end) {
+        mach_vm_size_t size = 0;
+        vm_region_top_info_data_t info{};
+        mach_msg_type_number_t count = VM_REGION_TOP_INFO_COUNT;
+        mach_port_t object = MACH_PORT_NULL;
+        if (mach_vm_region(mach_task_self(), &address, &size, VM_REGION_TOP_INFO, reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS || address >= end) return;
+        if (info.obj_id != 0) visit(info.obj_id);
+        address += size;
+    }
+}
+
+std::size_t directMappings() {
+    std::set<unsigned> objects;
+    {
+        Mapping probe(65536);
+        int file = -1;
+        std::uint64_t offset = 0;
+        require(GuestArena::GuestArenaSharedBacking_nid_postfix(probe.Address(), probe.size, &file, &offset), "cannot inspect mapping lifetimes");
+        struct stat status {};
+        const bool sized = fstat(file, &status) == 0 && status.st_size > 0;
+        void* view = sized ? mmap(nullptr, static_cast<std::size_t>(status.st_size), PROT_NONE, MAP_SHARED, file, 0) : MAP_FAILED;
+        close(file);
+        require(view != MAP_FAILED, "cannot inspect mapping lifetimes");
+        const auto begin = reinterpret_cast<mach_vm_address_t>(view);
+        regionObjects(begin, begin + static_cast<mach_vm_size_t>(status.st_size), [&](unsigned id) { objects.insert(id); });
+        munmap(view, static_cast<std::size_t>(status.st_size));
+    }
+    require(!objects.empty(), "cannot inspect mapping lifetimes");
+    std::size_t count = 0;
+    regionObjects(0, ~mach_vm_address_t{0}, [&](unsigned id) { if (objects.contains(id)) ++count; });
+    return count;
+}
+#elif !defined(_WIN32)
 std::size_t directMappings() {
     std::ifstream maps("/proc/self/maps");
     require(maps.is_open(), "cannot inspect mapping lifetimes");

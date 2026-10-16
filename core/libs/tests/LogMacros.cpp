@@ -38,7 +38,13 @@ std::vector<std::string> CaptureWrites(TAction action) {
     });
 #else
     int sockets[2];
+#if defined(__APPLE__)
+    Require(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets) == 0, "message socket pair");
+    const int capacity = 1 << 20;
+    Require(setsockopt(sockets[0], SOL_SOCKET, SO_SNDBUF, &capacity, sizeof(capacity)) == 0 && setsockopt(sockets[1], SOL_SOCKET, SO_RCVBUF, &capacity, sizeof(capacity)) == 0, "message socket capacity");
+#else
     Require(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0, "message socket pair");
+#endif
     std::FILE* stream = fdopen(sockets[0], "w");
     std::thread reader([&] {
         std::string buffer(1 << 20, '\0');
@@ -49,6 +55,9 @@ std::vector<std::string> CaptureWrites(TAction action) {
     Require(stream != nullptr, "message stream");
     Require(std::setvbuf(stream, nullptr, _IONBF, 0) == 0, "unbuffered message stream");
     action(stream);
+#if defined(__APPLE__)
+    Require(send(sockets[0], "", 0, 0) == 0, "message end marker");
+#endif
     std::fclose(stream);
     reader.join();
 #ifdef _WIN32

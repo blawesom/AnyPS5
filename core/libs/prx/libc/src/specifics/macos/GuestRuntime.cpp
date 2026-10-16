@@ -116,7 +116,7 @@ void* RunGuestMain(void* context) {
 
 }
 
-extern "C" __attribute__((visibility("hidden"))) std::uint8_t* Aps5GuestTlsAllocateSlow(GuestTlsDescriptor* descriptor) {
+extern "C" std::uint8_t* Aps5GuestTlsAllocateSlow(GuestTlsDescriptor* descriptor) {
     return AllocateGuestTls(descriptor);
 }
 

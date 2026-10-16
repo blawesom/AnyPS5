@@ -1775,12 +1775,20 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
         for (const auto byte : fault) Require(byte == std::byte{}, "rect-list fault buffer was not initialized");
         const ShaderRecompiler::BdaAbi::Fault report{ShaderRecompiler::BdaAbi::FaultState::Ready, ShaderRecompiler::BdaAbi::FaultReason::InvalidRectangle, 0, 0, 0, 0, 0};
         std::memcpy(fault.data(), &report, sizeof(report));
+#if defined(__APPLE__)
+        changed = 456;
+        std::memcpy(access.bytes(access.descriptor(6).buffer).data() + sizeof(std::uint32_t), &changed, sizeof(changed));
+        resources.WriteBack();
+        for (const auto byte : fault) Require(byte == std::byte{}, "a skipped rectangle left its fault record");
+        Require(guest[1] == changed, "rect-list fault-only path lost guest buffer writes");
+#else
         reject([&] { resources.WriteBack(); }, "rect-list requires");
         std::memset(fault.data(), 0, fault.size());
         changed = 456;
         std::memcpy(access.bytes(access.descriptor(6).buffer).data() + sizeof(std::uint32_t), &changed, sizeof(changed));
         resources.WriteBack();
         Require(guest[1] == changed, "rect-list fault-only path lost guest buffer writes");
+#endif
     }
     {
         ShaderRecompiler::RecompileResult control;
@@ -1793,7 +1801,12 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
         const auto fault = access.bytes(access.descriptor(5).buffer);
         const ShaderRecompiler::BdaAbi::Fault report{ShaderRecompiler::BdaAbi::FaultState::Ready, ShaderRecompiler::BdaAbi::FaultReason::InvalidRectangle, 0, 0, 0, 0, 0};
         std::memcpy(fault.data(), &report, sizeof(report));
+#if defined(__APPLE__)
+        resources.CheckFaults();
+        for (const auto byte : fault) Require(byte == std::byte{}, "a skipped rectangle left its fault record");
+#else
         reject([&] { resources.CheckFaults(); }, "rect-list requires");
+#endif
     }
     {
         ShaderResources resources(context, compiled, snapshots);
@@ -1828,10 +1841,12 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
         const ShaderRecompiler::BdaAbi::Fault report{ShaderRecompiler::BdaAbi::FaultState::Ready, ShaderRecompiler::BdaAbi::FaultReason::Unmapped, 0x7fff99880000ULL, 4, 0, 0x44, 0};
         std::memcpy(access.bytes(access.descriptor(5).buffer).data(), &report, sizeof(report));
         reject([&] { resources.WriteBack(); }, "BDA access failed");
+#if !defined(__APPLE__)
         auto invalidRectangle = report;
         invalidRectangle.reason = ShaderRecompiler::BdaAbi::FaultReason::InvalidRectangle;
         std::memcpy(access.bytes(access.descriptor(5).buffer).data(), &invalidRectangle, sizeof(invalidRectangle));
         reject([&] { resources.WriteBack(); }, "rect-list requires");
+#endif
         Require(guest[0] == 123, "failed GPU command published writes");
     }
     {

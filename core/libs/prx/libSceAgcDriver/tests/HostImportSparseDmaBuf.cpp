@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 int main() {
     std::printf("skipped, udmabuf imports are Linux only\n");
     return 77;

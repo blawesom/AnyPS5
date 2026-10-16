@@ -9,6 +9,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -169,7 +170,20 @@ static void PollsUrgentData() {
     Require(::send(peer, "u", 1, MSG_OOB) == 1);
     Require(poll_nid_postfix(&waiting, 1, 1000) == 1 && waiting.revents == Priority);
     PollDescriptor bands{urgent, In | Priority | Out, -1};
+#if defined(__APPLE__)
+    const int banded = poll_nid_postfix(&bands, 1, 0);
+    if (banded != 1 || bands.revents != (Priority | Out)) {
+        char peeked = 0;
+        const auto oob = recv_nid_postfix(urgent, &peeked, 1, 1 | 2);
+        const int oobError = *__error_nid_postfix();
+        PollDescriptor again{urgent, Priority, -1};
+        const int repeated = poll_nid_postfix(&again, 1, 0);
+        std::fprintf(stderr, "poll bands: result %d revents 0x%x; oob peek %lld errno %d; priority-only poll %d revents 0x%x\n", banded, static_cast<unsigned>(bands.revents), static_cast<long long>(oob), oobError, repeated, static_cast<unsigned>(again.revents));
+    }
+    Require(banded == 1 && bands.revents == (Priority | Out));
+#else
     Require(poll_nid_postfix(&bands, 1, 0) == 1 && bands.revents == (Priority | Out));
+#endif
 #ifdef _WIN32
     PollDescriptor band{urgent, ReadBand, -1};
     Require(poll_nid_postfix(&band, 1, 0) == 1 && band.revents == ReadBand);

@@ -33,7 +33,9 @@ static void RequireVolume(const char* path, const std::filesystem::path& native)
     std::array<std::uint64_t, 13> output;
     output.fill(0xA5A5A5A5A5A5A5A5ull);
     *__error_nid_postfix() = 12345;
-    Require(statvfs_nid_postfix(path, output.data() + 1) == 0);
+    const int status = statvfs_nid_postfix(path, output.data() + 1);
+    if (status != 0) std::fprintf(stderr, "path %s: statvfs failed with errno %d\n", path, *__error_nid_postfix());
+    Require(status == 0);
     Require(*__error_nid_postfix() == 12345);
     Require(output.front() == 0xA5A5A5A5A5A5A5A5ull && output.back() == output.front());
     const auto* fields = output.data() + 1;
@@ -63,6 +65,9 @@ static std::size_t OpenHandles() {
     DWORD count = 0;
     Require(GetProcessHandleCount(GetCurrentProcess(), &count) != 0);
     return count;
+#elif defined(__APPLE__)
+    return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator("/dev/fd"),
+        std::filesystem::directory_iterator{}));
 #else
     return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
         std::filesystem::directory_iterator{}));

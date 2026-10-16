@@ -6,6 +6,10 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#if defined(__APPLE__)
+#include <csignal>
+#include <unistd.h>
+#endif
 
 extern "C" {
 FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const char*, int, int);
@@ -152,9 +156,18 @@ int main() {
     Require(stream != nullptr && std::fgetc(stream->GetHandle()) == 'k');
     fclose_nid_postfix(stream);
 
-#ifndef _WIN32
+#if defined(__APPLE__)
+    int ends[2]{-1, -1};
+    Require(::pipe(ends) == 0);
+    ::close(ends[0]);
+    std::signal(SIGPIPE, SIG_IGN);
+    auto* full = ::fdopen(ends[1], "wb");
+    Require(full != nullptr);
+#elif !defined(_WIN32)
     auto* full = std::fopen("/dev/full", "wb");
     Require(full != nullptr);
+#endif
+#ifndef _WIN32
     auto* fullStream = new FileStream(full, true);
     Require(std::fwrite("buffered", 1, 8, full) == 8);
     Require(fclose_nid_postfix(fullStream) == EOF);

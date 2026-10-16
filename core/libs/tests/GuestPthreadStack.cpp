@@ -68,7 +68,11 @@ static void* APS5_VABI Worker(void* arg) {
     const auto local = reinterpret_cast<std::uintptr_t>(&size);
     Require(local > begin && local < begin + size);
     Require(local - begin + FRAME_SIZE >= requested);
+#if defined(__APPLE__)
+    const auto deepest = descend(begin);
+#else
     const auto deepest = Descend(begin);
+#endif
     Require(deepest >= begin && deepest < begin + FRAME_MARGIN);
     const auto hostDeepest = descend(begin - HOST_CALL_STACK);
     Require(hostDeepest < begin - HOST_CALL_STACK + FRAME_MARGIN);
