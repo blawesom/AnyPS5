@@ -25,10 +25,20 @@ constexpr const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 constexpr std::size_t ASCTIME_SIZE = sizeof("Sun Jan-2147483648 -2147483648:-2147483648:-2147483648     -2147481748\n");
 constexpr std::int64_t SECONDS_PER_DAY = 86400;
 constexpr std::int64_t DAYS_FROM_MARCH_TO_YEAR_END = 306;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 constexpr std::int64_t CALENDAR_CYCLE_YEARS = 400;
 constexpr std::int64_t CALENDAR_CYCLE_SECONDS = 146097 * SECONDS_PER_DAY;
+#ifdef _WIN32
+constexpr int HOST_ORDINARY_FIRST_YEAR = 70;
+constexpr int HOST_ORDINARY_LAST_YEAR = 1100;
+constexpr std::int64_t HOST_FIRST_SECOND = 0;
 constexpr std::int64_t HOST_LAST_SECOND = 32535215999;
+#else
+constexpr int HOST_ORDINARY_FIRST_YEAR = 0;
+constexpr int HOST_ORDINARY_LAST_YEAR = std::numeric_limits<int>::max();
+constexpr std::int64_t HOST_FIRST_SECOND = -2208988800;
+constexpr std::int64_t HOST_LAST_SECOND = std::numeric_limits<std::int64_t>::max();
+#endif
 
 std::int64_t calendarCycles(std::int64_t value, std::int64_t cycle) {
     return value >= 0 ? value / cycle : -((-(value + 1)) / cycle + 1);
@@ -530,12 +540,14 @@ int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
     std::tm host = toHostTm(*timeptr);
     host.tm_wday = -1;
     int64_t moved = 0;
-#ifdef _WIN32
-    const bool ordinary = host.tm_year > 70 && host.tm_year < 1100 && host.tm_mon >= 0 && host.tm_mon < 12 && host.tm_mday >= 1 && host.tm_mday <= 31
-        && host.tm_hour >= 0 && host.tm_hour < 24 && host.tm_min >= 0 && host.tm_min < 60 && host.tm_sec >= 0 && host.tm_sec <= 60;
-    const std::int64_t approximate = ordinary ? SECONDS_PER_DAY : utcSeconds(host);
-    if (approximate < SECONDS_PER_DAY || approximate > HOST_LAST_SECOND - SECONDS_PER_DAY) {
-        moved = calendarCycles(approximate - SECONDS_PER_DAY, CALENDAR_CYCLE_SECONDS) * CALENDAR_CYCLE_SECONDS;
+#if defined(_WIN32) || defined(__APPLE__)
+    const bool ordinary = host.tm_year > HOST_ORDINARY_FIRST_YEAR && host.tm_year < HOST_ORDINARY_LAST_YEAR && host.tm_mon >= 0 && host.tm_mon < 12
+        && host.tm_mday >= 1 && host.tm_mday <= 31 && host.tm_hour >= 0 && host.tm_hour < 24 && host.tm_min >= 0 && host.tm_min < 60
+        && host.tm_sec >= 0 && host.tm_sec <= 60;
+    constexpr std::int64_t firstOrdinary = HOST_FIRST_SECOND + SECONDS_PER_DAY;
+    const std::int64_t approximate = ordinary ? firstOrdinary : utcSeconds(host);
+    if (approximate < firstOrdinary || approximate > HOST_LAST_SECOND - SECONDS_PER_DAY) {
+        moved = calendarCycles(approximate - firstOrdinary, CALENDAR_CYCLE_SECONDS) * CALENDAR_CYCLE_SECONDS;
         GuestTm window{};
         if (!utcCalendarFields(approximate - moved, window)) return -1;
         window.tm_isdst = host.tm_isdst;
