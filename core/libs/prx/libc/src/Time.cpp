@@ -44,6 +44,22 @@ std::int64_t calendarCycles(std::int64_t value, std::int64_t cycle) {
     return value >= 0 ? value / cycle : -((-(value + 1)) / cycle + 1);
 }
 
+#ifdef __APPLE__
+bool timeOfLocalSeconds(std::int64_t local, std::int64_t& time) {
+    if (local < std::numeric_limits<std::int64_t>::min() + SECONDS_PER_DAY) return false;
+    time = local;
+    for (int step = 0; step < 4; ++step) {
+        const std::time_t probe = static_cast<std::time_t>(time);
+        std::tm fields{};
+        if (localtime_r(&probe, &fields) == nullptr) return false;
+        const std::int64_t next = local - fields.tm_gmtoff;
+        if (next == time) return true;
+        time = next;
+    }
+    return true;
+}
+#endif
+
 std::int64_t utcSeconds(const std::tm& time) {
     const std::int64_t years = calendarCycles(time.tm_mon, 12);
     const std::int64_t month = time.tm_mon - years * 12 + 1;
@@ -546,6 +562,15 @@ int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
         && host.tm_sec >= 0 && host.tm_sec <= 60;
     constexpr std::int64_t firstOrdinary = HOST_FIRST_SECOND + SECONDS_PER_DAY;
     const std::int64_t approximate = ordinary ? firstOrdinary : utcSeconds(host);
+#ifdef __APPLE__
+    if (approximate < firstOrdinary) {
+        std::int64_t time = 0;
+        GuestTm normalized{};
+        if (!timeOfLocalSeconds(approximate, time) || localtime_s_nid_postfix(&time, &normalized) == nullptr) return -1;
+        *timeptr = normalized;
+        return time;
+    }
+#endif
     if (approximate < firstOrdinary || approximate > HOST_LAST_SECOND - SECONDS_PER_DAY) {
         moved = calendarCycles(approximate - firstOrdinary, CALENDAR_CYCLE_SECONDS) * CALENDAR_CYCLE_SECONDS;
         GuestTm window{};
