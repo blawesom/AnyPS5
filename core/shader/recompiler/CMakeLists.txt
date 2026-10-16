@@ -242,6 +242,7 @@ function(add_shader_recompiler target runtimeTarget)
             PipelineSpecialization::IsWorkgroupOffset
             PipelineSpecialization::WorkgroupOffsetBase
             PipelineSpecialization::WorkgroupOffsetWords
+            IsFmaskTextureFormat
             PixelInput
             PixelInputBit
             RayTracingStrict
