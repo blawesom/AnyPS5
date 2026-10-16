@@ -85,6 +85,7 @@ void SetHostImportDeferredSettles(bool enabled);
 // The larger of 6 GiB and half the physical memory, at most the largest host heap less the larger of 2 GiB and half
 // that heap: the other half stays for the buffers, mirrors and textures that share it.
 std::uint64_t HostImportBudget(const VkPhysicalDeviceMemoryProperties& memory, std::uint64_t physicalBytes);
+void SetAddressCopyLimit(std::uint64_t bytes);
 std::uint64_t HostImportLiveBytes();
 struct HostImportSettleCounts {
     std::uint64_t submitted = 0;

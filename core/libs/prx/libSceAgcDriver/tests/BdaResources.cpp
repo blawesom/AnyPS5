@@ -1946,19 +1946,32 @@ void RunHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess& acce
     }
     Require(!AgcDriver::GuestMemory::Watched(heap, heapBytes), "the heap is still write-watched");
     std::memset(reinterpret_cast<void*>(heap + heapBytes / 2), 0x6b, block);
+    std::memset(reinterpret_cast<void*>(heap + block), 0x3c, block);
+    SetAddressCopyLimit(heapBytes / 2);
+    const auto refreshed = MirrorCounters();
     {
         GuestBufferMemory leased(importing);
         leased.AcquireRegistered();
         leased.Upload(true);
         const bool imported = HostImportCovers(importing, heap, heapBytes);
         Require(imported == throughImport, throughImport ? "the second build did not take the heap's import" : "the second build imported the heap past the budget");
-        Require(MirrorCounters().heapMirrors == before.heapMirrors, "the heap mirror whose range left the write watch was kept");
+        Require(MirrorCounters().heapMirrors == before.heapMirrors + (imported ? 0 : 1), imported ? "the heap mirror whose range the import took off the write watch was kept" : "the refused heap's mirror was dropped once its range left the write watch");
+        Require(imported || MirrorCounters().blocksCopied >= refreshed.blocksCopied + heapBytes / block, "the refused heap's mirror was not refreshed in full");
         const auto ranges = leased.AddressRanges();
         const auto found = std::find_if(ranges.begin(), ranges.end(), [&](const auto& range) { return range.begin == heap; });
         Require(found != ranges.end() && found->deviceAddress != 0u, "the heap is missing from the BDA table");
-        Require(imported || access.addressBytes(found->deviceAddress)[heapBytes / 2 + 3] == std::byte{0x6b}, "the second build does not serve the heap's new bytes");
+        Require(imported || (access.addressBytes(found->deviceAddress)[heapBytes / 2 + 3] == std::byte{0x6b} && access.addressBytes(found->deviceAddress)[block + 3] == std::byte{0x3c}), "the second build does not serve the heap's new bytes");
         leased.WriteBack();
     }
+    if (!throughImport) {
+        SetHostImportBudget(2 * (heapBytes + idleBytes + busyBytes));
+        GuestBufferMemory leased(importing);
+        leased.AcquireRegistered();
+        leased.Upload(true);
+        Require(HostImportCovers(importing, heap, heapBytes) && MirrorCounters().heapMirrors == before.heapMirrors, "the heap was not imported again once the budget held it");
+        leased.WriteBack();
+    }
+    SetAddressCopyLimit(0);
     SetHostImportBudget(0);
     registry(false);
     ClearImageMirrors(importing.device);
@@ -1975,13 +1988,13 @@ void RunHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess& acce
         munmap(piece.mapping, piece.allocated + block);
 #endif
     }
-    std::cout << (throughImport ? "an address-based build plans a heap again once a host import took its mirror's range off the write watch\n" : "an address-based build plans a heap again once its mirror's range has left the write watch\n");
+    std::cout << (throughImport ? "an address-based build plans a heap again once a host import took its mirror's range off the write watch\n" : "an address-based build keeps and refreshes a refused heap's mirror once its range has left the write watch, and imports the heap once the budget holds it\n");
 }
 
 void RunSparseHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess& access) {
     constexpr std::size_t block = 65536;
-    constexpr std::size_t reserved = 16 * block;
-    constexpr std::size_t committed = 4 * block;
+    constexpr std::size_t reserved = 64 * block;
+    constexpr std::size_t committed = 32 * block;
 #ifdef _WIN32
     if (!GuestArena::GuestArenaAvailable_nid_postfix() || !GuestArena::GuestArenaWriteWatched_nid_postfix()) {
         std::cout << "guest arena unavailable or not write-watched: sparse heap mirrors leaving the write watch not tested\n";
@@ -2019,17 +2032,22 @@ void RunSparseHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess
     AgcDriver::GuestMemory::Unwatch(base + block, block);
     Require(!AgcDriver::GuestMemory::Watched(base, committed), "the sparse heap is still write-watched");
     std::memset(guest + block, 0x6b, block);
+    std::memset(guest + 2 * block, 0x3c, block);
+    SetAddressCopyLimit(committed / 2);
+    const auto refreshed = MirrorCounters();
     {
         GuestBufferMemory leased(context);
         leased.AcquireRegistered();
         leased.Upload(true);
-        Require(MirrorCounters().heapMirrors == before.heapMirrors, "the sparse heap mirror whose range left the write watch was kept");
+        Require(MirrorCounters().heapMirrors == before.heapMirrors + 1, "the sparse heap's mirror was dropped once its range left the write watch");
+        Require(MirrorCounters().blocksCopied >= refreshed.blocksCopied + committed / block, "the sparse heap's mirror was not refreshed in full");
         const auto ranges = leased.AddressRanges();
         const auto found = std::find_if(ranges.begin(), ranges.end(), [&](const auto& range) { return range.begin == base; });
         Require(found != ranges.end() && found->deviceAddress != 0u, "the sparse heap is missing from the BDA table");
-        Require(access.addressBytes(found->deviceAddress)[block + 3] == std::byte{0x6b}, "the second build does not serve the sparse heap's new bytes");
+        Require(access.addressBytes(found->deviceAddress)[block + 3] == std::byte{0x6b} && access.addressBytes(found->deviceAddress)[2 * block + 3] == std::byte{0x3c}, "the second build does not serve the sparse heap's new bytes");
         leased.WriteBack();
     }
+    SetAddressCopyLimit(0);
     registry(false);
     ClearImageMirrors(context.device);
     ClearSnapshotCopies(context.device);
@@ -2040,7 +2058,7 @@ void RunSparseHeapMirrorUnwatchTests(const Context& context, const BdaTestAccess
     GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(guest, reserved);
     releaseSparse(guest, reserved);
 #endif
-    std::cout << "an address-based build plans a sparse heap again once its mirror's range has left the write watch\n";
+    std::cout << "an address-based build keeps and refreshes a sparse heap's mirror once its range has left the write watch\n";
 }
 
 void hostWriteWatchExclusionTests() {

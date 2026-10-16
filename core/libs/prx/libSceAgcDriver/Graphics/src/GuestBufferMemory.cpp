@@ -1382,6 +1382,7 @@ std::uint64_t physicalMemoryBytes() {
 }
 
 std::atomic<std::uint64_t> budgetOverride{0};
+std::atomic<std::uint64_t> addressCopyLimitOverride{0};
 
 // Pinned imports count against the driver's system memory heap, which imports, type-3 mirrors, buffers and textures
 // placed in host memory share; past it ordinary host allocations fail. The budget is APS5_HOST_IMPORT_MIB, else
@@ -2211,6 +2212,11 @@ void appendChangedBlocks(std::span<ImageMirror* const> mirrors, std::uint64_t ge
     }
 }
 
+void markUnwatched(ImageMirror& mirror) {
+    ++Mirrors().heapUnwatched;
+    std::fill(mirror.generations.begin(), mirror.generations.end(), 0);
+}
+
 void appendHeapRun(std::span<ImageMirror* const> mirrors, std::uint64_t generation, std::vector<RefreshBlock>& blocks) {
     if (generation != 0) {
         appendChangedBlocks(mirrors, generation, blocks);
@@ -2219,10 +2225,7 @@ void appendHeapRun(std::span<ImageMirror* const> mirrors, std::uint64_t generati
     for (std::size_t index = 0; index < mirrors.size(); ++index) {
         auto& mirror = *mirrors[index];
         const auto own = GuestMemory::CollectWrites(mirror.base, static_cast<std::size_t>(mirror.bytes));
-        if (own == 0) {
-            ++Mirrors().heapUnwatched;
-            std::fill(mirror.generations.begin(), mirror.generations.end(), 0);
-        }
+        if (own == 0) markUnwatched(mirror);
         appendChangedBlocks(mirrors.subspan(index, 1), own, blocks);
     }
 }
@@ -2337,7 +2340,7 @@ bool refreshSparseMirror(ImageMirror& mirror, std::vector<RefreshBlock>& blocks)
     if (!pieces.empty() && pieces.back().second > mirror.base + mirror.bytes) return false;
     syncRange(mirror.base, mirror.bytes);
     const auto generation = collectPieces(pieces);
-    if (generation == 0) return false;
+    if (generation == 0) markUnwatched(mirror);
     appendSparseBlocks(mirror, std::move(pieces), generation, blocks);
     return true;
 }
@@ -2387,6 +2390,10 @@ bool heapMirrorWatched(ImageMirror& mirror) {
     return true;
 }
 
+bool importsNow(const Context& context, HostImports& state, const GuestAllocations::Lease& lease, std::uint64_t address) {
+    return context.hostImportAlignment != 0 && (importsStale(context, state) || importAllocation(context, state, address, lease, 0, false) != nullptr);
+}
+
 // The mirror for a leased image range: the existing one, or a new one when none exists or the
 // registered Range object changed (a protection change). Null when the range cannot be mirrored. An
 // existing writable mirror's blocks are appended to `blocks` for the caller's one compare of every
@@ -2407,11 +2414,11 @@ std::shared_ptr<ImageMirror> acquireMirror(const Context& context, const std::sh
         if (found != state.entries.end() && sameRange(found->second->range, range) && found->second->reserved == range->bytes && found->second->writable == range->writable && found->second->heap == heap) mirror = found->second;
     }
     if (mirror != nullptr) {
-        if (!mirror->sparse && (!heap || heapMirrorWatched(*mirror))) {
+        if (!mirror->sparse) {
             if (!heap && prepareRefresh(*mirror, range->address, range->bytes)) appendBlocks(blocks, *mirror, range->address, range->bytes);
             return mirror;
         }
-        if (mirror->sparse && refreshSparseMirror(*mirror, blocks)) return mirror;
+        if (refreshSparseMirror(*mirror, blocks)) return mirror;
     }
     Pieces pieces;
     if (!GuestMemory::Accessible(reinterpret_cast<const void*>(range->address), range->bytes, range->writable && !heap)) {
@@ -3154,6 +3161,10 @@ std::uint64_t HostImportBudget(const VkPhysicalDeviceMemoryProperties& memory, c
     return hostHeap > reserve ? std::min(fromMemory, hostHeap - reserve) : fromMemory;
 }
 
+void SetAddressCopyLimit(std::uint64_t bytes) {
+    addressCopyLimitOverride.store(bytes, std::memory_order_relaxed);
+}
+
 std::uint64_t HostImportLiveBytes() {
     auto& state = Imports();
     std::lock_guard lock(state.mutex);
@@ -3329,11 +3340,12 @@ void GuestBufferMemory::AcquireRegistered() {
         {
             auto& state = Imports();
             std::lock_guard lock(state.mutex);
+            const auto keeps = [&](ImageMirror* mirror) { return heapMirrorWatched(*mirror) || !importsNow(context, state, current->lease, mirror->base); };
             if (current == nullptr) (spaces.droppedByWaiter.exchange(false, std::memory_order_relaxed) ? spaces.rebuiltWaiterDrop : spaces.rebuiltFirst).fetch_add(1, std::memory_order_relaxed);
             else if (current->device != context.device) spaces.rebuiltDevice.fetch_add(1, std::memory_order_relaxed);
             else if (current->generation != generation) spaces.rebuiltGeneration.fetch_add(1, std::memory_order_relaxed);
             else if (current->importsEpoch != state.epoch) spaces.rebuiltEpoch.fetch_add(1, std::memory_order_relaxed);
-            else hit = std::all_of(current->heapMirrors.begin(), current->heapMirrors.end(), [](ImageMirror* mirror) { return heapMirrorWatched(*mirror); });
+            else hit = std::all_of(current->heapMirrors.begin(), current->heapMirrors.end(), keeps) && std::all_of(current->sparseMirrors.begin(), current->sparseMirrors.end(), keeps);
             importFloor = state.useCounter + 1;
             if (hit) {
                 const auto stamp = ++state.useCounter;
@@ -3444,7 +3456,8 @@ void GuestBufferMemory::AcquireRegistered() {
             const char* value = std::getenv("APS5_ADDRESS_COPY_MAX_MIB");
             return (value ? std::strtoull(value, nullptr, 10) : 64ull) << 20u;
         }();
-        if (const auto overflow = AddressCopyOverflow(std::move(copies), copyLimit); !overflow.empty()) {
+        const auto limit = addressCopyLimitOverride.load(std::memory_order_relaxed);
+        if (const auto overflow = AddressCopyOverflow(std::move(copies), limit != 0 ? limit : copyLimit); !overflow.empty()) {
             std::fprintf(stderr, "FATAL: %s\n", overflow.c_str());
             std::fflush(stderr);
             std::abort();
