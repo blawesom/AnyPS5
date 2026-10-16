@@ -225,6 +225,7 @@ int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourcePara
     ValidateGeomApply(*listener, *source, flags);
 
     Ngs2GeomAttribute attribute{};
+    attribute.pitch_ratio = 1.0f;
     const auto local = TransformPoint(*listener, source->position);
     const float distance = Length(local);
     const float level = std::clamp(
