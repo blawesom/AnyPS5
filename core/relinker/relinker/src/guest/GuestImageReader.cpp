@@ -311,13 +311,17 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
             if (relocation == 8) {
                 if ((info >> 32) != 0) {
                     const auto& symbol = image.Symbols[info >> 32];
-                    if (symbol.Section == 0 || addend > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) || symbol.Value != addend)
-                        fail("RELATIVE relocation has a symbol");
-                    mapped(addend, 0, 0);
-                    Io::AppendU64(output, target);
-                    Io::AppendU64(output, relocation);
-                    Io::AppendU64(output, addend);
-                    continue;
+                    const bool sectionSymbol = symbol.Info == 3 && symbol.Value == 0;
+                    const bool matching = symbol.Section != 0 && addend <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) && symbol.Value == addend;
+                    if (!sectionSymbol && !matching) fail("RELATIVE relocation has a symbol");
+                    if (matching) {
+                        mapped(addend, 0, 0);
+                        Io::AppendU64(output, target);
+                        Io::AppendU64(output, relocation);
+                        Io::AppendU64(output, addend);
+                        continue;
+                    }
+                    // A section symbol keeps the common encoding below, as before this change.
                 }
                 mapped(addend, 0, 0);
             } else if (relocation == 1 || relocation == 6 || relocation == 7) {
