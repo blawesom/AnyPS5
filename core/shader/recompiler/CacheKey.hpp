@@ -296,6 +296,7 @@ private:
         append(key, value.robustBufferAccess2);
         append(key, value.float32FlushToZero);
         append(key, value.gpuResolvedImages);
+        append(key, value.deviceImageTables);
         append(key, value.gpuConstants);
         append(key, value.gpuConstantsVerify);
     }
