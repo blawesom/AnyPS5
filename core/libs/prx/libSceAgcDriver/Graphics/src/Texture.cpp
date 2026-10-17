@@ -350,7 +350,7 @@ Texture::Texture(const Context& context, TextureDetiler& detiler, const GuestTex
         allocation.allocationSize = requirements.size;
         allocationBytes = requirements.size;
         allocation.memoryTypeIndex = context.DeviceMemoryType(requirements.memoryTypeBits, requirements.size, "texture");
-        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory texture");
+        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory texture", true);
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, owned->memory, 0), "vkBindImageMemory");
 
         const VkImage uploadImage = image;
@@ -684,7 +684,7 @@ Texture::Texture(const Context& context, const std::shared_ptr<StorageTexture>& 
         allocation.allocationSize = requirements.size;
         allocationBytes = requirements.size;
         allocation.memoryTypeIndex = context.MemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory block copy");
+        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory block copy", true);
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, owned->memory, 0), "vkBindImageMemory block copy");
 
         const auto viewLevelCount = std::min(descriptor.lastLevel, descriptor.mipCount - 1u) - descriptor.baseLevel + 1u;
@@ -741,7 +741,7 @@ Texture::Texture(const Context& context, const std::shared_ptr<StorageTexture>& 
         allocation.allocationSize = requirements.size;
         allocationBytes = requirements.size;
         allocation.memoryTypeIndex = context.MemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory depth copy");
+        owned->memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory depth copy", true);
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, owned->memory, 0), "vkBindImageMemory depth copy");
 
         const auto viewLevelCount = std::min(descriptor.lastLevel, descriptor.mipCount - 1u) - descriptor.baseLevel + 1u;
@@ -1409,7 +1409,7 @@ StorageTexture::StorageTexture(const Context& context, TextureDetiler& detiler, 
         allocation.allocationSize = requirements.size;
         memoryBytes = requirements.size;
         allocation.memoryTypeIndex = context.DeviceMemoryType(requirements.memoryTypeBits, requirements.size, "storage texture");
-        memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory storage texture");
+        memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory storage texture", true);
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, memory, 0), "vkBindImageMemory storage");
     } catch (...) {
         release();

@@ -10,6 +10,7 @@
 #include <deque>
 #include <initializer_list>
 #include <map>
+#include <limits>
 #include <memory>
 #include <new>
 #include <set>
@@ -687,7 +688,8 @@ VkDeviceMemory ExternalAllocation(VkDeviceSize bytes) {
     return memory;
 }
 
-VkDeviceSize mockCacheReclaim(VkDeviceSize bytes) {
+VkDeviceSize mockCacheReclaim(VkDeviceSize bytes, bool newImage) {
+    Expect(!newImage, "a pooled buffer allocation requested image-creation cache access");
     ++reclaimMock.requests;
     reclaimMock.asked = bytes;
     if (reclaimMock.external == VK_NULL_HANDLE) return 0;
@@ -699,6 +701,10 @@ VkDeviceSize mockCacheReclaim(VkDeviceSize bytes) {
 void CacheReclaimRecovery() {
     Expect(BufferPool::ReclaimTarget(4 * MiB) == 260 * MiB, "a 4 MiB request does not ask the caches for 256 MiB on top of itself");
     Expect(BufferPool::ReclaimTarget(512 * MiB) == 1024 * MiB, "a 512 MiB request does not ask the caches for twice its size");
+    const auto limit = std::numeric_limits<VkDeviceSize>::max();
+    Expect(BufferPool::ReclaimTarget(limit / 2u) == limit - 1u, "the largest doubled request without overflow lost its reserve");
+    Expect(BufferPool::ReclaimTarget(limit / 2u + 1u) == limit, "a reclaim target wrapped when twice the request overflowed");
+    Expect(BufferPool::ReclaimTarget(limit) == limit, "the largest reclaim request wrapped to a smaller target");
     constexpr auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     mock = MockDevice{};
     reclaimMock = ReclaimMock{};
