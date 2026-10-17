@@ -280,6 +280,7 @@ CompiledVariant sampleVariant() {
     image.singleMipPlaneBiasCompatible = true;
     image.flatLineCompatible = false;
     image.flatVolumeLineCompatible = false;
+    image.dimensionQueryOnly = false;
     image.foldTexelOffsetsOnly = true;
     image.byElements = 4;
     image.byComponents = 1;

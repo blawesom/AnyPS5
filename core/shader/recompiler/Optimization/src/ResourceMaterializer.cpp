@@ -191,7 +191,7 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
     if (!validImageDescriptor(descriptor, base.r128)) {
         return rejectImage(invalidImageReason(descriptor), "image descriptor is invalid");
     }
-    decoded.dimension = descriptorDimension(descriptor, base.dimension);
+    decoded.dimension = descriptorDimension(descriptor, base.dimension == RdnaImageDimension::Dim1D && base.dimensionQueryOnly ? RdnaImageDimension::Dim2DArray : base.dimension);
     decoded.cube = descriptorIsCube(descriptor);
     const auto format = rawImageFormat(descriptor);
     if (base.atomic64 && format != IrBufferFormat::Format32_32UInt && format != IrBufferFormat::Format32_32SInt && format != IrBufferFormat::Format32_32Float) {
@@ -1880,10 +1880,23 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
             line.dimension = RdnaImageDimension::Dim1D;
             modes.push_back(line);
         }
-        if (image.dimension == RdnaImageDimension::Dim1D && !storage && !depth && conversion == IrBufferFormat::Invalid && packed == IrBufferFormat::Invalid) {
+        const bool planeAdded = image.dimension == RdnaImageDimension::Dim1D && !storage && !depth && conversion == IrBufferFormat::Invalid && packed == IrBufferFormat::Invalid;
+        if (planeAdded) {
             auto plane = mode;
             plane.dimension = RdnaImageDimension::Dim2D;
             modes.push_back(plane);
+        }
+        if (image.dimension == RdnaImageDimension::Dim1D && image.dimensionQueryOnly && !storage) {
+            for (const auto dimension : {RdnaImageDimension::Dim2D, RdnaImageDimension::Dim1DArray, RdnaImageDimension::Dim2DArray, RdnaImageDimension::Dim3D}) {
+                if (dimension == RdnaImageDimension::Dim2D && planeAdded) continue;
+                auto view = mode;
+                view.dimension = dimension;
+                modes.push_back(view);
+            }
+            auto cube = mode;
+            cube.dimension = RdnaImageDimension::Dim2DArray;
+            cube.cube = true;
+            modes.push_back(cube);
         }
         if (image.dimension == RdnaImageDimension::Dim1DArray || image.dimension == RdnaImageDimension::Dim2DArray || image.dimension == RdnaImageDimension::Dim2DMsaaArray) {
             auto plain = mode;
