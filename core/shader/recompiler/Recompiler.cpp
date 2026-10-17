@@ -1243,19 +1243,25 @@ RecompileResult recompileOnce(const RecompileRequest& request) {
         bool complete = false;
         auto images = ResourceMaterializer::ExpectedDeviceImages(plan, runtime, complete);
         if (complete) snapshot.deviceImages = std::move(images);
+        return complete;
+    };
+    const auto cpuTable = [&] {
+        auto fallback = request;
+        fallback.target.deviceImageTables = false;
+        return RecompileImpl(fallback);
     };
     if (!request.useCache) {
         auto program = PrepareResourceProgram(request);
         const auto plan = materializer.ExtractPlan(program);
         materializer.Materialize(plan, runtime, snapshot);
-        expect(plan);
+        if (!expect(plan)) return cpuTable();
         const auto variant = compileVariant(request, std::move(program));
         return materializeResult(variant, request, snapshot);
     }
     const auto source = getSource(request);
     const auto plan = acquirePlan(request, source, true);
     materializer.Materialize(*plan, runtime, snapshot);
-    expect(*plan);
+    if (!expect(*plan)) return cpuTable();
     return materializeVariant(*source, request, snapshot);
 }
 
