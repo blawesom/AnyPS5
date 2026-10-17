@@ -77,6 +77,7 @@ void SetHostImportWindow(std::uint64_t bytes);
 void SetHostImportRangeWindow(std::uint64_t bytes);
 void SetHostImportBudget(std::uint64_t bytes);
 void SetHostImportDeferredSettles(bool enabled);
+void SetHostImportMaxBytes(std::uint64_t bytes);
 std::uint64_t HostImportLiveBytes();
 struct HostImportSettleCounts {
     std::uint64_t submitted = 0;
