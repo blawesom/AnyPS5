@@ -307,6 +307,7 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
             const auto next = relocationTargets.lower_bound(target);
             if ((next != relocationTargets.end() && next->first < target + 8) || (next != relocationTargets.begin() && std::prev(next)->second > target)) fail("Overlapping guest relocations");
             relocationTargets.emplace(target, target + 8);
+            bool ownTlsBlock = false;
             if (relocation == 8) {
                 if ((info >> 32) != 0) {
                     const auto& symbol = image.Symbols[info >> 32];
@@ -324,11 +325,12 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
                 if ((info >> 32) == 0 || (symbol.Info & 15) == 6 || (relocation != 1 && addend != 0) || (symbol.Section == 0 && symbol.Name.empty())) fail("Invalid guest symbol relocation");
             } else {
                 const auto& symbol = image.Symbols[info >> 32];
-                if (((info >> 32) == 0 && tls == nullptr) || ((info >> 32) != 0 && (symbol.Info & 15) != 6) || (relocation == 16 && addend != 0)) fail("Invalid guest TLS relocation");
+                ownTlsBlock = (info >> 32) != 0 && symbol.Info == 3 && symbol.Value == 0 && tls != nullptr;
+                if (((info >> 32) == 0 && tls == nullptr) || ((info >> 32) != 0 && (symbol.Info & 15) != 6 && !ownTlsBlock) || (relocation == 16 && addend != 0)) fail("Invalid guest TLS relocation");
             }
             const auto position = output.size();
             output.insert(output.end(), bytes.begin() + offset + index, bytes.begin() + offset + index + 24);
-            if (relocation == 8) Io::WriteU64(output, position + 8, 8);
+            if (relocation == 8 || ownTlsBlock) Io::WriteU64(output, position + 8, relocation);
         }
     };
     if (tags.contains(7) || tags.contains(0x6100002f)) {
