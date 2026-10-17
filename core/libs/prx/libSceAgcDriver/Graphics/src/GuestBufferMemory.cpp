@@ -1617,11 +1617,9 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
         }
     }
 #endif
-    const auto inserted = state.imports.emplace(base, entry);
-    owner.armed = false;
-    return &inserted.first->second;
     const auto [placed, added] = state.imports.emplace(base, entry);
     if (added) ++state.inserted;
+    owner.armed = false;
     return &placed->second;
 }
 

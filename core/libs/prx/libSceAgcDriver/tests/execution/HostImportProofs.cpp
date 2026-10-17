@@ -31,6 +31,7 @@ constexpr std::uint64_t BlockBytes = 2 * WindowBytes;
 constexpr std::uint64_t OtherBytes = 64 * 1024;
 constexpr std::uint64_t GuestAlignment = 64 * 1024;
 constexpr std::uint64_t ProbeBytes = 4096;
+constexpr std::uint64_t ImportWindowBytes = 8 * MiB;
 
 std::string Hex(std::uint64_t value) {
     char text[32];
@@ -40,13 +41,15 @@ std::string Hex(std::uint64_t value) {
 
 class GuestBlock {
 public:
-    explicit GuestBlock(std::uint64_t size) : bytes(size) {
+    explicit GuestBlock(std::uint64_t size, std::uint64_t alignment = GuestAlignment) : bytes(size) {
 #ifdef _WIN32
-        block = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        reserved = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, bytes + OtherBytes + alignment, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 #else
-        block = static_cast<std::uint8_t*>(std::aligned_alloc(GuestAlignment, bytes));
+        reserved = static_cast<std::uint8_t*>(std::aligned_alloc(alignment, (bytes + OtherBytes + alignment - 1) / alignment * alignment));
 #endif
-        Require(block != nullptr, "host import proofs: cannot allocate a guest block of " + Hex(bytes));
+        Require(reserved != nullptr, "host import proofs: cannot allocate a guest block of " + Hex(bytes));
+        const auto address = reinterpret_cast<std::uintptr_t>(reserved);
+        block = reserved + ((alignment - address % alignment) % alignment);
         std::memset(block, 0, bytes);
         GuestAllocations::Mutation().Add(block, bytes, true, true, true);
     }
@@ -54,9 +57,9 @@ public:
     ~GuestBlock() {
         GuestAllocations::Mutation().Remove(block);
 #ifdef _WIN32
-        VirtualFree(block, 0, MEM_RELEASE);
+        VirtualFree(reserved, 0, MEM_RELEASE);
 #else
-        std::free(block);
+        std::free(reserved);
 #endif
     }
 
@@ -64,9 +67,11 @@ public:
     GuestBlock& operator=(const GuestBlock&) = delete;
 
     std::uint8_t* Data() const { return block; }
+    std::uint64_t Bytes() const { return bytes; }
     std::uint64_t Address() const { return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(block)); }
 
 private:
+    std::uint8_t* reserved = nullptr;
     std::uint8_t* block = nullptr;
     std::uint64_t bytes = 0;
 };
@@ -116,11 +121,30 @@ Outcome ProofsFollowTheImports() {
     return Outcome::Passed;
 }
 
+Outcome ProofsFollowTheRuns() {
+    GuestBlock guest(ImportWindowBytes - OtherBytes, ImportWindowBytes);
+    auto device = OpenVulkanTestDevice();
+    if (!device) return Outcome::NoDevice;
+    const auto probe = Probe(*device);
+    if (!Fill(*device, guest.Address())) return Outcome::NoImport;
+    Require(Graphics::HostImportSerial(probe, guest.Address(), ProbeBytes, false) != 0, "host import proofs: the range at " + Hex(guest.Address()) + " is not imported");
+    const auto proof = Graphics::HostImportsIdentity(probe);
+    Require(Graphics::HostImportsReconciledUnchanged(probe, proof), "host import proofs: a proof taken over the range does not hold");
+
+    const auto tail = guest.Data() + guest.Bytes();
+    GuestAllocations::Mutation().Add(tail, OtherBytes, true, true, true);
+    const bool held = Graphics::HostImportsReconciledUnchanged(probe, proof);
+    GuestAllocations::Mutation().Remove(tail);
+    Require(!held, "host import proofs: a registration completed the import window of " + Hex(guest.Address()) + ", but the proof over its import held");
+    return Outcome::Passed;
+}
+
 }
 
 int main() {
     try {
-        const auto outcome = ProofsFollowTheImports();
+        auto outcome = ProofsFollowTheImports();
+        if (outcome == Outcome::Passed) outcome = ProofsFollowTheRuns();
         if (outcome == Outcome::NoDevice) return VulkanTestSkipped;
         if (outcome == Outcome::NoImport) {
             std::printf("skipped, the device does not import guest memory\n");
