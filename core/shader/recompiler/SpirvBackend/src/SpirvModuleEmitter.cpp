@@ -1350,6 +1350,7 @@ void EmitProgram(SpirvEmitterState& state) {
         state.module.AddFunction(spv::OpBeginInvocationInterlockEXT);
     }
     EmitMemoryOffsets(state);
+    EmitHeapSlotPreload(state);
     if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadMasked()) {
         const auto& pixel = *state.inputInfo.pixel;
         const auto quad = EmitQuadPixel(state);
