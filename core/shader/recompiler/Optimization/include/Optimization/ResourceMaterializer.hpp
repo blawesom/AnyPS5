@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,12 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+struct DeviceImageInterface {
+    std::uint64_t id = 0;
+    ImageResource image;
+    std::vector<ImageResource> modes;
+};
+
 class ResourceMaterializer {
 public:
     static std::uint32_t EmulatedCompareState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index);
@@ -76,6 +83,9 @@ public:
     static std::shared_ptr<const ResolvedImageTables> ResolveImageTablesShared(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint64_t memoKey);
     static bool NullImageDescriptor(const ImageResource& image, const DescriptorValue& descriptor);
     static ResolvedImageTables ResolveImageTables(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint64_t memoKey = 0);
+    static std::uint64_t DeviceImageInterfaceId(const ImageResource& image, std::span<const ImageResource> modes);
+    static void RegisterDeviceImageInterfaces(const ShaderInfo& info);
+    static std::shared_ptr<const DeviceImageInterface> FindDeviceImageInterface(std::uint64_t id);
     [[nodiscard]] IrResourcePlan ExtractPlan(const IrProgram& program) const;
     static void CompactPlan(IrResourcePlan& plan);
     void Materialize(const IrResourcePlan& program, const SrtRuntime& runtime, ResourceSnapshot& snapshot) const;

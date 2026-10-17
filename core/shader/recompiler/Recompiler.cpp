@@ -1085,6 +1085,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
     const auto resolved = ResourceMaterializer::ResolveImageTablesShared(variant.info.info, snapshot, artifact.variantId);
     const auto& tables = *resolved;
     if (usedPlan != nullptr) *usedPlan = {entry != nullptr ? std::shared_ptr<const void>(entry) : std::shared_ptr<const void>(plan), bindingPlan};
+    ResourceMaterializer::RegisterDeviceImageInterfaces(variant.info.info);
     BindingAllocationResult bindings;
     DescriptorBindingBuilder{}.Populate(bindings, variant.bindings, *bindingPlan, variant.info.userDataBase, snapshot, partialThreads(request), &tables);
     result.workgroupMemoryDwords = WorkgroupMemoryStrideDwords(variant.info.info);
