@@ -10,6 +10,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/FloatFlushProbe.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/BindlessHeap.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/DeviceImageTable.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
@@ -86,6 +87,11 @@ void check(VkResult result, const char* operation) {
 
 void require(bool condition, const char* reason) {
     if (!condition) throw std::runtime_error(std::string("Vulkan presentation: ") + reason);
+}
+
+void reportDeviceImagePathRefusal(const std::string& reason) {
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true)) std::fprintf(stderr, "[device-images] APS5_GPU_PATH stays off on this device: %s\n", reason.c_str());
 }
 
 bool CoreVulkanCapability(std::uint32_t capability) {
@@ -321,6 +327,7 @@ struct VulkanDevice::State {
     bool storageBufferUpdateAfterBind = false;
     bool descriptorBindingPartiallyBound = false;
     bool bindlessHeapFeatures = false;
+    bool deviceImagePath = false;
     bool descriptorBindingVariableDescriptorCount = false;
     bool runtimeDescriptorArray = false;
     VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptorIndexingProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT};
@@ -1673,12 +1680,22 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->descriptorBindingPartiallyBound = descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE;
         state->descriptorBindingVariableDescriptorCount = descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount == VK_TRUE;
         state->runtimeDescriptorArray = descriptorIndexingFeatures.runtimeDescriptorArray == VK_TRUE;
-        state->bindlessHeapFeatures = Graphics::BindlessTexturesEnabled() && descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE && descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE && descriptorIndexingFeatures.descriptorBindingUpdateUnusedWhilePending == VK_TRUE;
-        if (state->bindlessHeapFeatures) state->descriptorBindingPartiallyBound = true;
-        if (state->storageBufferUpdateAfterBind) {
+        const bool heapFeatures = descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE && descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE && descriptorIndexingFeatures.descriptorBindingUpdateUnusedWhilePending == VK_TRUE;
+        if (state->storageBufferUpdateAfterBind || Graphics::GpuPathEnabled()) {
             VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &state->descriptorIndexingProperties};
             state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
         }
+        if (Graphics::GpuPathEnabled()) {
+            const auto& indexed = state->descriptorIndexingProperties;
+            const Graphics::DeviceImagePathFeatures pathFeatures{heapFeatures, state->descriptorIndexing, std::min(indexed.maxPerStageDescriptorUpdateAfterBindSampledImages, indexed.maxDescriptorSetUpdateAfterBindSampledImages), std::min(indexed.maxPerStageDescriptorUpdateAfterBindSamplers, indexed.maxDescriptorSetUpdateAfterBindSamplers)};
+            const auto refusal = Graphics::DeviceImagePathRefusal(state->properties.limits, pathFeatures);
+            state->deviceImagePath = !refusal.has_value();
+            if (refusal.has_value()) reportDeviceImagePathRefusal(*refusal);
+        }
+        state->bindlessHeapFeatures = (Graphics::BindlessTexturesEnabled() || state->deviceImagePath) && heapFeatures;
+        if (state->bindlessHeapFeatures) state->descriptorBindingPartiallyBound = true;
+    } else if (Graphics::GpuPathEnabled()) {
+        reportDeviceImagePathRefusal("the device lacks VK_EXT_descriptor_indexing, which the image heap needs");
     }
     if (Graphics::GpuHeapEnabled() && !state->bindlessHeapFeatures) throw std::runtime_error("APS5_GPU_HEAP needs descriptorBindingSampledImageUpdateAfterBind, descriptorBindingPartiallyBound and descriptorBindingUpdateUnusedWhilePending; this device lacks one, so unset APS5_GPU_HEAP");
     descriptorIndexingFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT};
@@ -3563,6 +3580,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::Target() const {
     auto target = state->shaderProfile->Target();
     target.float32FlushToZero = state->float32FlushToZero;
     target.gpuConstants = Graphics::GpuConstantsEnabled();
+    target.deviceImageTables = state->deviceImagePath;
     static const bool verifyGpuConstants = std::getenv("APS5_VERIFY_GPU_HEAP") != nullptr;
     target.gpuConstantsVerify = target.gpuConstants && verifyGpuConstants;
     return target;
@@ -3627,6 +3645,10 @@ bool VulkanDevice::ProvokingVertexLast() const {
 
 bool VulkanDevice::GraphicsPipelineLibraries() const {
     return state->graphicsPipelineLibrary;
+}
+
+bool VulkanDevice::DeviceImagePath() const {
+    return state->deviceImagePath;
 }
 
 Graphics::Context VulkanDevice::graphicsContext() const {
