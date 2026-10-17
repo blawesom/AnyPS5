@@ -1636,6 +1636,60 @@ TableWord LookupTableWord(SpirvEmitterState& state, const TableColumn& column, s
     return word;
 }
 
+TableWord LookupTablePointer(SpirvEmitterState& state, std::uint32_t pointerLow, std::uint32_t pointerHigh, std::uint32_t tableHeader) {
+    const auto u32 = TypeU32(state);
+    const auto boolean = TypeBool(state);
+    const auto constant = [&](std::uint32_t value) { return ConstantU32(state, value); };
+    const auto field = [&](std::uint32_t offset) { return LoadTableMap(state, constant(tableHeader + offset)); };
+    const auto both = [&](std::uint32_t left, std::uint32_t right) { return Binary(state, spv::OpLogicalAnd, boolean, left, right); };
+    const auto mapStart = field(ImageTableAbi::TableMapStart);
+    const auto storedCount = field(ImageTableAbi::TableKeyCount);
+    const auto fault = field(ImageTableAbi::TableFault);
+    const auto usable = both(Binary(state, spv::OpULessThanEqual, boolean, storedCount, constant(ImageTableAbi::MaxParentKeys)), Binary(state, spv::OpIEqual, boolean, fault, constant(0u)));
+    const auto count = Select(state, u32, usable, storedCount, constant(0u));
+    const auto recordAt = [&](std::uint32_t index) { return Binary(state, spv::OpIAdd, u32, mapStart, Binary(state, spv::OpIMul, u32, index, constant(ImageTableAbi::PointerRecordWords))); };
+    const auto header = state.module.AllocateId();
+    const auto body = state.module.AllocateId();
+    const auto continuation = state.module.AllocateId();
+    const auto merge = state.module.AllocateId();
+    const auto entryLabel = state.currentLabel;
+    const auto lower = state.module.AllocateId();
+    const auto upper = state.module.AllocateId();
+    const auto newLower = state.module.AllocateId();
+    const auto newUpper = state.module.AllocateId();
+    state.module.AddFunction(spv::OpBranch, header);
+    EmitLabel(state, header);
+    state.module.AddFunction(spv::OpPhi, u32, lower, constant(0u), entryLabel, newLower, continuation);
+    state.module.AddFunction(spv::OpPhi, u32, upper, count, entryLabel, newUpper, continuation);
+    const auto search = Binary(state, spv::OpULessThan, boolean, lower, upper);
+    state.module.AddFunction(spv::OpLoopMerge, merge, continuation, spv::LoopControlMaskNone);
+    state.module.AddFunction(spv::OpBranchConditional, search, body, merge);
+    EmitLabel(state, body);
+    const auto midpoint = Binary(state, spv::OpIAdd, u32, lower, Binary(state, spv::OpShiftRightLogical, u32, Binary(state, spv::OpISub, u32, upper, lower), constant(1u)));
+    const auto record = recordAt(midpoint);
+    const auto low = TableMapAt(state, record, 0u);
+    const auto high = TableMapAt(state, record, 1u);
+    const auto less = Binary(state, spv::OpLogicalOr, boolean, Binary(state, spv::OpULessThan, boolean, high, pointerHigh), both(Binary(state, spv::OpIEqual, boolean, high, pointerHigh), Binary(state, spv::OpULessThan, boolean, low, pointerLow)));
+    state.module.AddFunction(spv::OpSelect, u32, newLower, less, Binary(state, spv::OpIAdd, u32, midpoint, constant(1u)), lower);
+    state.module.AddFunction(spv::OpSelect, u32, newUpper, less, upper, midpoint);
+    state.module.AddFunction(spv::OpBranch, continuation);
+    EmitLabel(state, continuation);
+    state.module.AddFunction(spv::OpBranch, header);
+    EmitLabel(state, merge);
+    const auto inBounds = Binary(state, spv::OpULessThan, boolean, lower, count);
+    const auto selected = Select(state, u32, inBounds, recordAt(lower), constant(tableHeader));
+    const auto same = both(Binary(state, spv::OpIEqual, boolean, TableMapAt(state, selected, 0u), pointerLow), Binary(state, spv::OpIEqual, boolean, TableMapAt(state, selected, 1u), pointerHigh));
+    const auto nullPointer = both(Binary(state, spv::OpIEqual, boolean, pointerLow, constant(0u)), Binary(state, spv::OpIEqual, boolean, pointerHigh, constant(0u)));
+    const auto missing = Select(state, u32, nullPointer, field(ImageTableAbi::TableOutsideCode), constant(ImageTableAbi::PoisonCode(ImageTableAbi::OutsideSnapshotPoison)));
+    const auto code = Select(state, u32, both(inBounds, same), TableMapAt(state, selected, 2u), missing);
+    TableWord word;
+    word.code = Select(state, u32, Binary(state, spv::OpINotEqual, boolean, fault, constant(0u)), fault, code);
+    word.addressLow = pointerLow;
+    word.addressHigh = pointerHigh;
+    word.poisoned = Binary(state, spv::OpINotEqual, boolean, Binary(state, spv::OpBitwiseAnd, u32, word.code, constant(ImageTableAbi::PoisonFlag)), constant(0u));
+    return word;
+}
+
 TableWord EmitTableWord(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t source, std::uint32_t table, std::size_t argument) {
     auto& state = ctx.state;
     const IrValue* handle = inst.Argument(argument)->Resolve();
@@ -1646,8 +1700,8 @@ TableWord EmitTableWord(SpirvValueEmitContext& ctx, const IrValue& inst, std::ui
     const auto header = ImageTableAbi::TableHeader(table);
     const auto& parent = sources.at(column.heapSource).tableColumn;
     if (!parent.has_value()) return LookupTableWord(state, column, offset, header);
-    if (!parent->buffer || handle->ArgumentCount() < 2u) ctx.Fail(inst, "has a nested image table without its buffer key");
-    const auto root = LookupTableWord(state, *parent, ctx.Def(handle->Argument(1)), header);
+    if (!parent->buffer || !parent->indirect || handle->ArgumentCount() < 3u) ctx.Fail(inst, "has a nested image table without its buffer pointer");
+    const auto root = LookupTablePointer(state, ctx.Def(handle->Argument(1)), ctx.Def(handle->Argument(2)), header);
     const auto u32 = TypeU32(state);
     const auto childHeader = Select(state, u32, root.poisoned, ConstantU32(state, header), root.code);
     auto word = LookupTableWord(state, column, offset, childHeader, true);

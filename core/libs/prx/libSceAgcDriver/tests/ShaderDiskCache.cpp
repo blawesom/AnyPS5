@@ -1429,6 +1429,7 @@ struct PlanFixture {
     ShaderStage stage = ShaderStage::Compute;
     std::uint64_t codeAddress = 0;
     std::uint32_t waveSize = 64;
+    bool groupId = false;
     std::vector<std::uint32_t> code;
     std::vector<std::uint32_t> userData;
     std::vector<std::pair<std::uint64_t, std::vector<std::uint32_t>>> regions;
@@ -1445,7 +1446,7 @@ struct PlanFixture {
         request.context.waveSize = waveSize;
         request.context.userDataBaseRegister = 0;
         request.context.userData = userData;
-        if (stage == ShaderStage::Compute) request.context.compute = ShaderComputeStageInfo{{waveSize, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+        if (stage == ShaderStage::Compute) request.context.compute = ShaderComputeStageInfo{{waveSize, 1u, 1u}, 0u, {groupId, false, false}, false, 1u};
         request.context.pixel = pixel;
         request.context.memory = memory;
         request.target.vulkanVersion = 0x00401000u;
@@ -1544,6 +1545,31 @@ std::vector<PlanFixture> planFixtures() {
     place(palette, 0x10u, imageWords(PlanTextureAddress));
     place(palette, 0x18u, imageWords(PlanTextureAddress + 0x100u));
     add("pointer image table", 64, {0xf4080200u, 0xfa000000u, 0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0x7e200500u, 0x8f108210u, 0xf4200444u, 0x20000000u, 0x8711ff11u, 0x000000ffu, 0x8f128511u, 0xf40c0900u, 0x24000040u, 0xf09c0f08u, 0x01090000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, palette}, {PlanMaterialAddress, {0u, 1u, 0u, 1u, 0u, 0u, 0u, 0u}}});
+
+    std::vector<std::uint32_t> nestedSrt(16u, 0u);
+    place(nestedSrt, 0u, bufferWords(PlanTableAddress, 16u, 4u));
+    place(nestedSrt, 4u, bufferWords(PlanMaterialAddress, 0u, 32u));
+    place(nestedSrt, 8u, bufferWords(PlanOutputAddress, 0u, 4096u));
+    std::vector<std::uint32_t> parents(16u, 0u);
+    place(parents, 2u, {static_cast<std::uint32_t>(PlanPointerAddress), static_cast<std::uint32_t>(PlanPointerAddress >> 32u)});
+    place(parents, 6u, {static_cast<std::uint32_t>(PlanPointerAddress + 256u), static_cast<std::uint32_t>(PlanPointerAddress >> 32u)});
+    std::vector<std::uint32_t> nestedBuffers(128u, 0u);
+    place(nestedBuffers, 40u, bufferWords(PlanPayloadAddress, 64u, 1u));
+    place(nestedBuffers, 104u, bufferWords(PlanPayloadAddress + 64u, 64u, 1u));
+    std::vector<std::uint32_t> nestedImages(32u, 0u);
+    place(nestedImages, 0u, imageWords(PlanTextureAddress));
+    place(nestedImages, 8u, imageWords(PlanTextureAddress + 256u));
+    place(nestedImages, 16u, imageWords(PlanTextureAddress + 256u));
+    place(nestedImages, 24u, imageWords(PlanTextureAddress + 512u));
+    std::vector<std::uint32_t> nestedCode{0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080700u, 0xfa000020u, 0xf4080800u, 0xfa000030u,
+    0x8f108302u, 0xf4200444u, 0x20000000u, 0xf4200504u, 0x20000004u, 0x8f128411u, 0x8f148514u,
+    0xf4240b02u, 0x24000008u, 0xf4080616u, 0xfa0000a0u, 0xf42c090cu, 0x28000000u,
+    0x360200bfu, 0x7e020d01u, 0x060202f0u, 0x100202ffu, 0x3c800000u, 0x7e0402ffu, 0x3e000000u, 0xf09c0f08u,
+    0x01090401u, 0x7e120202u, 0x34101286u, 0x4a101100u, 0x34101084u, 0xe0781000u, 0x80070408u, 0xbf810000u,};
+    nestedCode.insert(nestedCode.begin() + 13u, 0x87118311u);
+    nestedCode.insert(nestedCode.begin() + 15u, 0x87148114u);
+    add("nested pointer image table", 64u, std::move(nestedCode), srtPointer, {{PlanSrtAddress, nestedSrt}, {PlanTableAddress, parents}, {PlanPointerAddress, nestedBuffers}, {PlanPayloadAddress, nestedImages}, {PlanMaterialAddress, {0u, 0u, 0u, 1u, 1u, 0u, 1u, 1u}}});
+    fixtures.back().groupId = true;
 
     PlanFixture fragment;
     fragment.name = "fragment parameters";

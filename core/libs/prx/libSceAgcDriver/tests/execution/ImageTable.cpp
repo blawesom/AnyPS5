@@ -1226,11 +1226,17 @@ void RunPointerRecordTests(AgcDriver::VulkanDevice& device) {
     RequireRed(changed, 1, Lanes, texels[0], "float texels after the T# behind record 1's pointer changed");
 }
 
-void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
+enum class NestedCase { Basic, Large, Budget };
+constexpr std::uint32_t NestedParentLimit = 524288u;
+constexpr std::uint32_t NestedKeyLimit = 1048576u;
+
+void RunNestedRecordTests(AgcDriver::VulkanDevice& device, NestedCase selected) {
     Fill();
-    alignas(256) std::array<std::array<std::uint32_t, 44>, 2> records{};
+    alignas(512) std::array<std::array<std::uint32_t, 64>, 2> records{};
     alignas(256) std::array<std::array<std::uint32_t, 16>, 2> palettes{};
     std::vector<std::uint32_t> extra;
+    std::vector<std::uint32_t> wideRoots;
+    std::uint32_t rootBytes = 64u;
     const std::array images{Image(FloatTexels.data(), Format32Float), Image(UintTexels.data(), Format32UInt), Image(SintTexels.data(), Format32SInt)};
     const std::array<std::function<std::uint32_t(std::uint32_t)>, 3> texels{
         [](std::uint32_t x) { return std::bit_cast<std::uint32_t>(FloatTexels[x]); },
@@ -1253,38 +1259,114 @@ void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
         Table[record * 4u + 2u] = static_cast<std::uint32_t>(pointer);
         Table[record * 4u + 3u] = static_cast<std::uint32_t>(pointer >> 32u);
     }
-    const auto run = [&](std::span<const std::uint32_t> code = NestedRecordCode) {
-        const auto table = Buffer(Table.data(), 4u * 16u);
+    auto phi = std::vector<std::uint32_t>(NestedRecordCode.begin(), NestedRecordCode.end());
+    phi.insert(phi.begin() + 17u, {0xbf068011u, 0xbf840002u, 0xbeac03ffu, 0x000000eau});
+    const auto run = [&](std::span<const std::uint32_t> code = NestedRecordCode, std::uint32_t waveSize = 64u) {
+        auto table = Buffer(Table.data(), rootBytes);
+        if (!wideRoots.empty()) {
+            table = Buffer(wideRoots.data(), static_cast<std::uint32_t>(wideRoots.size() / 4u));
+            table[1] |= 16u << 16u;
+            table[3] = 0x00005204u;
+        }
         const auto keys = Buffer(Keys.data(), static_cast<std::uint32_t>(sizeof(Keys)));
         const auto output = Buffer(Output.data(), static_cast<std::uint32_t>(sizeof(Output)));
         std::copy(table.begin(), table.end(), Srt.begin());
         std::copy(keys.begin(), keys.end(), Srt.begin() + 4u);
         std::copy(output.begin(), output.end(), Srt.begin() + 8u);
         std::copy(PointClamp.begin(), PointClamp.end(), Srt.begin() + 12u);
-        const std::array<ShaderRecompiler::MemoryRegion, 7> memory{{
+        std::vector<ShaderRecompiler::MemoryRegion> memory{
             {reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)},
             {reinterpret_cast<std::uintptr_t>(Srt.data()), std::as_bytes(std::span(Srt))},
             {reinterpret_cast<std::uintptr_t>(Table.data()), std::as_bytes(std::span(Table))},
             {reinterpret_cast<std::uintptr_t>(Keys.data()), std::as_bytes(std::span(Keys))},
             {reinterpret_cast<std::uintptr_t>(records.data()), std::as_bytes(std::span(records))},
             {reinterpret_cast<std::uintptr_t>(palettes.data()), std::as_bytes(std::span(palettes))},
-            {reinterpret_cast<std::uintptr_t>(extra.data()), std::as_bytes(std::span(extra))},
-        }};
+        };
+        if (!extra.empty()) memory.push_back({reinterpret_cast<std::uintptr_t>(extra.data()), std::as_bytes(std::span(extra))});
+        if (!wideRoots.empty()) memory.push_back({reinterpret_cast<std::uintptr_t>(wideRoots.data()), std::as_bytes(std::span(wideRoots))});
         const auto inputTable = Table;
         const auto inputKeys = Keys;
         const auto inputRecords = records;
         const auto inputPalettes = palettes;
         const auto inputExtra = extra;
-        auto result = Execute(device, code, Srt.data(), std::span(memory).first(extra.empty() ? 6u : 7u), 4u, Lanes, 64u);
-        Require(Table == inputTable && Keys == inputKeys && records == inputRecords && palettes == inputPalettes && extra == inputExtra, "nested image table: dispatch modified its input memory");
+        const auto inputRoots = wideRoots;
+        auto result = Execute(device, code, Srt.data(), memory, 4u, Lanes, waveSize);
+        Require(Table == inputTable && Keys == inputKeys && records == inputRecords && palettes == inputPalettes && extra == inputExtra && wideRoots == inputRoots, "nested image table: dispatch modified its input memory");
         Require(std::all_of(Output.begin() + 4u * Lanes * 4u, Output.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: dispatch wrote past its output");
         return result;
     };
     const std::array<std::uint32_t, 8> keys{0u, 0u, 0u, 1u, 1u, 0u, 1u, 1u};
     std::copy(keys.begin(), keys.end(), Keys.begin());
     Keys[8] = 3u;
+    if (selected != NestedCase::Basic) {
+        const auto putRoot = [&](std::uint32_t index, const void* pointer) {
+            const auto address = reinterpret_cast<std::uintptr_t>(pointer);
+            wideRoots[index * 4u + 2u] = static_cast<std::uint32_t>(address);
+            wideRoots[index * 4u + 3u] = static_cast<std::uint32_t>(address >> 32u);
+        };
+        if (selected == NestedCase::Large) {
+            constexpr std::uint32_t Parents = 0x54ffcu;
+            constexpr std::uint32_t Children = 0x20000u;
+            wideRoots.resize(Parents * 4u, 0u);
+            putRoot(0u, records[0].data());
+            putRoot(Parents - 1u, records[1].data());
+            extra.resize(Children * 8u, 0u);
+            std::copy(images[0].begin(), images[0].end(), extra.begin());
+            std::copy(images[2].begin(), images[2].end(), extra.end() - 8u);
+            auto descriptor = Buffer(extra.data(), 0x10000u);
+            descriptor[1] |= 64u << 16u;
+            descriptor[3] = 0x00005204u;
+            std::copy(descriptor.begin(), descriptor.end(), records[1].begin() + 40u);
+            Keys = {};
+            for (std::uint32_t group = 0; group < 4u; ++group) {
+                Keys[group * 2u] = Parents - 1u;
+                Keys[group * 2u + 1u] = group % 2u == 0u ? Children - 1u : 0u;
+            }
+            const auto direct = run();
+            Require(!Faulted(direct), "nested image table: the reported parent and child domains were truncated");
+            for (std::uint32_t group = 0; group < 4u; ++group) RequireRed(direct, group, Lanes, texels[group % 2u == 0u ? 2u : 0u], "nested image table: first and last keys of the reported domains");
+            const auto merged = run(phi);
+            Require(!Faulted(merged) && merged.words == direct.words, "nested image table: pointer Phi changed the large-domain readback");
+            Require(merged.tableMap.size() < Children + 1024u, "nested image table: a Cartesian product was allocated");
+            std::puts("nested image table: 348156 parents, 131072 inner keys and pointer Phi checked");
+            return;
+        }
+        wideRoots.resize((NestedParentLimit + 1u) * 4u, 0u);
+        putRoot(0u, records[0].data());
+        putRoot(NestedParentLimit, records[1].data());
+        Keys = {};
+        Keys[0] = NestedParentLimit;
+        const auto parentBound = run();
+        Require(Faulted(parentBound) && parentBound.log.find("outside the snapshot") != std::string::npos, "nested image table: a parent beyond the scan budget did not fault");
+        Require(std::all_of(parentBound.words.begin(), parentBound.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: an uncaptured parent published copied output");
+        putRoot(NestedParentLimit, records[0].data());
+        const auto knownAlias = run();
+        Require(!Faulted(knownAlias), "nested image table: a pointer already captured at another index was refused");
+        RequireRed(knownAlias, 0u, Lanes, texels[0], "nested image table: captured pointer reached past the scanned prefix");
+        wideRoots.clear();
+        std::copy(keys.begin(), keys.end(), Keys.begin());
+        std::fprintf(stderr, "nested image table: checking snapshot budget\n");
+        extra.resize((NestedKeyLimit + 1u) * 8u, 0u);
+        std::copy(images[0].begin(), images[0].end(), extra.begin());
+        const auto large = Buffer(extra.data(), static_cast<std::uint32_t>(extra.size() * sizeof(std::uint32_t)));
+        std::copy(large.begin(), large.end(), records[0].begin() + 40u);
+        Keys[0] = 0u;
+        Keys[1] = 0u;
+        const auto bounded = run();
+        Require(Faulted(bounded) && bounded.log.find("outside the snapshot") != std::string::npos, "nested image table: an uncaptured child did not fault:\n" + bounded.log);
+        Require(bounded.tableMap.size() < NestedKeyLimit + 1024u, "nested image table: the two levels produced an unbounded map");
+        Require(std::all_of(bounded.words.begin(), bounded.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: a dispatch outside the snapshot published copied output");
+        std::copy(large.begin(), large.end(), records[1].begin() + 40u);
+        const auto sharedBudget = run();
+        Require(!Faulted(sharedBudget) && sharedBudget.tableMap.size() < NestedKeyLimit + 1024u, "nested image table: equal V#s consumed the snapshot budget twice");
+        RequireRed(sharedBudget, 2u, Lanes, texels[0], "nested image table: aliased parent at the snapshot budget");
+        std::puts("nested image table parent and child budgets checked");
+        return;
+    }
     const auto original = run();
     Require(!Faulted(original), "nested image table: valid independent keys faulted:\n" + original.log);
+    const auto wave32 = run(NestedRecordCode, 32u);
+    Require(!Faulted(wave32) && wave32.words == original.words, "nested image table: wave32 and wave64 disagree");
     Require(original.imageTableCount == 3u, "nested image table: duplicate descriptors did not share one image");
     for (std::uint32_t group = 0; group < 4u; ++group) RequireRed(original, group, Lanes, texels[keys[group * 2u] + keys[group * 2u + 1u]], "nested image table independent keys");
     Require(original.imageTableReadRanges.size() == 1u, "nested image table: missing read ranges");
@@ -1295,6 +1377,19 @@ void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
     for (std::uint32_t parent = 0; parent < 2u; ++parent) {
         Require(covers(records[parent].data() + 40u, 16u) && covers(palettes[parent].data(), 64u), "nested image table: a V# or its palette is absent from the write-overlap ranges");
     }
+    auto loop = std::vector<std::uint32_t>(NestedRecordCode.begin(), NestedRecordCode.end() - 1u);
+    const auto secondLow = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(records[1].data()));
+    loop.insert(loop.end(), {0xbf06ff2cu, secondLow, 0xbf850003u, 0xbeac03ffu, secondLow, 0xbf82ffe7u, 0xbf810000u});
+    for (std::uint32_t group = 0; group < 4u; ++group) Keys[group * 2u] = 0u;
+    const auto carried = run(loop);
+    Require(!Faulted(carried), "nested image table: a valid pointer carried around a loop faulted");
+    for (std::uint32_t group = 0; group < 4u; ++group) RequireRed(carried, group, Lanes, texels[1u + Keys[group * 2u + 1u]], "nested image table: the pointer selected on the back edge");
+    auto loopFault = loop;
+    loopFault[37] = 0xeau;
+    loopFault[40] = 0xeau;
+    const auto rejectedLoop = run(loopFault);
+    Require(Faulted(rejectedLoop) && std::all_of(rejectedLoop.words.begin(), rejectedLoop.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: an invalid back-edge pointer committed partial output");
+    std::copy(keys.begin(), keys.end(), Keys.begin());
     std::copy(images[0].begin(), images[0].end(), palettes[1].begin());
     const auto edited = run();
     Require(!Faulted(edited) && Group(edited, 2) == Group(original, 0) && Group(edited, 3) == Group(original, 3), "nested image table: changing only a child map retained a stale invocation");
@@ -1303,7 +1398,7 @@ void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
     Keys[0] = 2u;
     const auto alias = run();
     Require(!Faulted(alias) && Group(alias, 0) == Group(original, 0), "nested image table: an aliased parent changed the result");
-    std::copy(records[0].begin() + 40u, records[0].end(), records[1].begin() + 40u);
+    std::copy_n(records[0].begin() + 40u, 4u, records[1].begin() + 40u);
     const auto moved = run();
     Require(!Faulted(moved) && Group(moved, 2) == Group(original, 0) && Group(moved, 3) == Group(original, 1), "nested image table: replacing the nested V# retained stale texels");
     Require(moved.artifactId == original.artifactId, "nested image table: moving a descriptor recompiled the shader");
@@ -1335,25 +1430,44 @@ void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
     shared.insert(shared.begin() + 21u, {0xf4200c8cu, 0xfa000000u});
     std::fprintf(stderr, "nested image table: checking shared V# refusal\n");
     refused(shared, "a V# with another buffer consumer");
-    auto phi = std::vector<std::uint32_t>(NestedRecordCode.begin(), NestedRecordCode.end());
-    phi.insert(phi.begin() + 17u, {0xbf068011u, 0xbf840002u, 0xbeac03ffu, 0x000000eau});
-    std::fprintf(stderr, "nested image table: checking pointer Phi refusal\n");
-    refused(phi, "an unresolved pointer Phi");
-    std::fprintf(stderr, "nested image table: checking snapshot budget\n");
-    extra.resize((ShaderRecompiler::ImageTableAbi::MaxKeys + 1u) * 8u, 0u);
-    std::copy(images[0].begin(), images[0].end(), extra.begin());
-    const auto large = Buffer(extra.data(), static_cast<std::uint32_t>(extra.size() * sizeof(std::uint32_t)));
-    std::copy(large.begin(), large.end(), records[0].begin() + 40u);
+    rootBytes = 0u;
+    const auto empty = run();
+    Require(Faulted(empty) && empty.log.find("unmapped") != std::string::npos, "nested image table: an empty pointer dictionary did not fault");
+    rootBytes = 64u;
+    const auto originalHigh = Table[7];
+    const auto originalLow = Table[6];
+    Table[6] = Table[2];
+    Table[7] = 0xffffffffu;
+    Keys = {};
+    Keys[8] = 1u;
+    const auto highControl = run();
+    Require(!Faulted(highControl), "nested image table: a different high pointer word rejected the valid pointer");
+    RequireRed(highControl, 0u, Lanes, texels[0], "nested image table: low-word alias control");
+    Keys[0] = 1u;
+    const auto highFault = run();
+    Require(Faulted(highFault) && highFault.log.find("unmapped") != std::string::npos, "nested image table: the high pointer word was ignored");
+    Table[7] = 0xfffffffeu;
+    const auto movedFault = run();
+    Require(Faulted(movedFault) && movedFault.log.find("unmapped") != std::string::npos, "nested image table: a changed poison pointer reused a stale map");
+    Table[6] = originalLow;
+    Table[7] = originalHigh;
+    std::copy(keys.begin(), keys.end(), Keys.begin());
+    for (std::uint32_t group = 0; group < 4u; ++group) Keys[group * 2u] = 1u;
+    const auto phiValid = run(phi);
+    Require(!Faulted(phiValid), "nested image table: a captured pointer selected through Phi faulted");
+    for (std::uint32_t group = 0; group < 4u; ++group) RequireRed(phiValid, group, Lanes, texels[Keys[group * 2u + 1u]], "nested image table: Phi-selected pointer");
     Keys[0] = 0u;
-    Keys[1] = 0u;
-    const auto bounded = run();
-    Require(Faulted(bounded) && bounded.log.find("outside the snapshot") != std::string::npos, "nested image table: an uncaptured child did not fault:\n" + bounded.log);
-    Require(bounded.tableMap.size() < ShaderRecompiler::ImageTableAbi::MaxKeys + 1024u, "nested image table: the two levels produced an unbounded map");
-    Require(std::all_of(bounded.words.begin(), bounded.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: a dispatch outside the snapshot published copied output");
-    std::copy(large.begin(), large.end(), records[1].begin() + 40u);
-    const auto sharedBudget = run();
-    Require(!Faulted(sharedBudget) && sharedBudget.tableMap.size() < ShaderRecompiler::ImageTableAbi::MaxKeys + 1024u, "nested image table: equal V#s consumed the snapshot budget twice");
-    RequireRed(sharedBudget, 2u, Lanes, texels[0], "nested image table: aliased parent at the snapshot budget");
+    auto guardedPhi = phi;
+    guardedPhi.insert(guardedPhi.begin() + 32u, {0xbf068011u, 0xbf850008u});
+    const auto inactivePhi = run(guardedPhi);
+    Require(!Faulted(inactivePhi), "nested image table: an inactive image access reported the uncaptured Phi arm");
+    const auto inactiveWords = Group(inactivePhi, 0u);
+    Require(std::all_of(inactiveWords.begin(), inactiveWords.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: the inactive image arm wrote output");
+    for (std::uint32_t group = 1u; group < 4u; ++group) Require(Group(inactivePhi, group) == Group(phiValid, group), "nested image table: guarding the uncaptured arm changed active groups");
+    const auto phiFault = run(phi);
+    Require(Faulted(phiFault) && phiFault.log.find("outside the snapshot") != std::string::npos, "nested image table: the uncaptured Phi arm was assumed unreachable");
+    Require(std::all_of(phiFault.words.begin(), phiFault.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: an uncaptured pointer published copied output");
+    Require(phiFault.artifactId == phiValid.artifactId, "nested image table: the pointer choice was specialized on the CPU");
     std::puts("nested image table independent keys, alias, descriptor replacement, faults, budget and refusals checked");
 }
 
@@ -1571,7 +1685,15 @@ int main(int argc, char** argv) {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         if (argc == 2 && std::strcmp(argv[1], "--nested") == 0) {
-            RunNestedRecordTests(*device);
+            RunNestedRecordTests(*device, NestedCase::Basic);
+            return 0;
+        }
+        if (argc == 2 && std::strcmp(argv[1], "--nested-large") == 0) {
+            RunNestedRecordTests(*device, NestedCase::Large);
+            return 0;
+        }
+        if (argc == 2 && std::strcmp(argv[1], "--nested-budget") == 0) {
+            RunNestedRecordTests(*device, NestedCase::Budget);
             return 0;
         }
         RunTests(*device);
