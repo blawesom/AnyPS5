@@ -109,8 +109,15 @@ void ValidateProvokingVertex(const Context& context, const State& state, std::sp
         }
         return;
     }
+    if (BarycentricPatches(state, shaders)) {
+        for (const auto& shader : shaders) {
+            if (shader.stage != ShaderRecompiler::ShaderStage::Fragment || shader.program == nullptr) continue;
+            Require(std::none_of(shader.program->fragmentParameters.begin(), shader.program->fragmentParameters.end(), [](const ShaderRecompiler::FragmentParameter& parameter) { return parameter.flat && parameter.perVertex; }), "last provoking vertex with explicit per-vertex flat interpolation is unsupported");
+        }
+        return;
+    }
     Require(context.provokingVertexLast, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
-    Require(!BarycentricPatches(state, shaders) && state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "last provoking vertex is unsupported for generated primitive pipelines");
+    Require(state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "last provoking vertex is unsupported for generated primitive pipelines");
     Require(state.rectList || state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "last provoking vertex is unsupported for this primitive topology");
     for (const auto& shader : shaders) {
         if (shader.stage != ShaderRecompiler::ShaderStage::Fragment) continue;
