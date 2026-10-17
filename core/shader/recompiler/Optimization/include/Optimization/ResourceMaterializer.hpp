@@ -93,6 +93,7 @@ public:
     static ImageTableReuseCounts TableReuse();
     static std::uint64_t EvaluateNanoseconds();
     static std::uint64_t MaterializeNanoseconds();
+    static std::uint64_t TableSnapshotColumns();
 };
 
 }
