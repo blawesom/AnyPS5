@@ -280,6 +280,14 @@ alignas(256) constexpr std::array<std::uint32_t, 32> IndirectRecordCode{
 
 alignas(256) std::array<std::uint32_t, Records * 16> Indirect{};
 
+alignas(256) constexpr std::array<std::uint32_t, 37> NestedRecordCode{
+    0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080700u, 0xfa000020u, 0xf4080800u, 0xfa000030u,
+    0x8f108302u, 0xf4200444u, 0x20000000u, 0xf4200504u, 0x20000004u, 0x8f128411u, 0x8f148514u,
+    0xf4240b02u, 0x24000008u, 0xf4080616u, 0xfa0000a0u, 0xf42c090cu, 0x28000000u,
+    0x360200bfu, 0x7e020d01u, 0x060202f0u, 0x100202ffu, 0x3c800000u, 0x7e0402ffu, 0x3e000000u, 0xf09c0f08u,
+    0x01090401u, 0x7e120202u, 0x34101286u, 0x4a101100u, 0x34101084u, 0xe0781000u, 0x80070408u, 0xbf810000u,
+};
+
 constexpr std::array<std::uint32_t, 4> PointClamp{0x92u, (4u * 256u) << 12u, 0u, 0u};
 constexpr std::array<std::uint32_t, 4> LinearWrap{0u, (4u * 256u) << 12u, (1u << 20u) | (1u << 22u), 0u};
 constexpr std::array<std::uint32_t, 4> PointWrap{0u, (4u * 256u) << 12u, 1u << 24u, 0u};
@@ -366,6 +374,7 @@ struct Outcome {
     bool cacheable = false;
     std::vector<std::array<std::uint32_t, 4>> samplers;
     std::vector<std::array<std::uint32_t, 4>> samplerTable;
+    std::vector<std::uint32_t> tableMap;
     std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> imageTableReadRanges;
 };
 
@@ -396,6 +405,7 @@ Outcome Execute(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> 
     outcome.imageTableReadRanges = result.imageTableReadRanges;
     for (const auto& binding : result.bindings) {
         if (binding.role == ShaderRecompiler::DescriptorRole::ImageTable || binding.role == ShaderRecompiler::DescriptorRole::ImageStorageTable) outcome.imageTableCount = binding.count;
+        if (binding.role == ShaderRecompiler::DescriptorRole::ImageTableMap) outcome.tableMap = binding.guestDescriptor;
         if (binding.role == ShaderRecompiler::DescriptorRole::GuestSamplers) outcome.samplers = SamplerWords(binding.guestDescriptor);
         if (binding.role == ShaderRecompiler::DescriptorRole::SamplerTable) outcome.samplerTable = SamplerWords(binding.guestDescriptor);
     }
@@ -1216,6 +1226,137 @@ void RunPointerRecordTests(AgcDriver::VulkanDevice& device) {
     RequireRed(changed, 1, Lanes, texels[0], "float texels after the T# behind record 1's pointer changed");
 }
 
+void RunNestedRecordTests(AgcDriver::VulkanDevice& device) {
+    Fill();
+    alignas(256) std::array<std::array<std::uint32_t, 44>, 2> records{};
+    alignas(256) std::array<std::array<std::uint32_t, 16>, 2> palettes{};
+    std::vector<std::uint32_t> extra;
+    const std::array images{Image(FloatTexels.data(), Format32Float), Image(UintTexels.data(), Format32UInt), Image(SintTexels.data(), Format32SInt)};
+    const std::array<std::function<std::uint32_t(std::uint32_t)>, 3> texels{
+        [](std::uint32_t x) { return std::bit_cast<std::uint32_t>(FloatTexels[x]); },
+        [](std::uint32_t x) { return UintTexels[x]; },
+        [](std::uint32_t x) { return static_cast<std::uint32_t>(SintTexels[x]); },
+    };
+    Table = {};
+    Keys = {};
+    for (std::uint32_t outer = 0; outer < 2u; ++outer) {
+        auto descriptor = Buffer(palettes[outer].data(), 1u);
+        descriptor[1] |= 64u << 16u;
+        std::copy(descriptor.begin(), descriptor.end(), records[outer].begin() + 40u);
+        for (std::uint32_t inner = 0; inner < 2u; ++inner) {
+            const auto& image = images[outer + inner];
+            std::copy(image.begin(), image.end(), palettes[outer].begin() + inner * 8u);
+        }
+    }
+    for (std::uint32_t record = 0; record < 3u; ++record) {
+        const auto pointer = reinterpret_cast<std::uintptr_t>(records[record % 2u].data());
+        Table[record * 4u + 2u] = static_cast<std::uint32_t>(pointer);
+        Table[record * 4u + 3u] = static_cast<std::uint32_t>(pointer >> 32u);
+    }
+    const auto run = [&](std::span<const std::uint32_t> code = NestedRecordCode) {
+        const auto table = Buffer(Table.data(), 4u * 16u);
+        const auto keys = Buffer(Keys.data(), static_cast<std::uint32_t>(sizeof(Keys)));
+        const auto output = Buffer(Output.data(), static_cast<std::uint32_t>(sizeof(Output)));
+        std::copy(table.begin(), table.end(), Srt.begin());
+        std::copy(keys.begin(), keys.end(), Srt.begin() + 4u);
+        std::copy(output.begin(), output.end(), Srt.begin() + 8u);
+        std::copy(PointClamp.begin(), PointClamp.end(), Srt.begin() + 12u);
+        const std::array<ShaderRecompiler::MemoryRegion, 7> memory{{
+            {reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)},
+            {reinterpret_cast<std::uintptr_t>(Srt.data()), std::as_bytes(std::span(Srt))},
+            {reinterpret_cast<std::uintptr_t>(Table.data()), std::as_bytes(std::span(Table))},
+            {reinterpret_cast<std::uintptr_t>(Keys.data()), std::as_bytes(std::span(Keys))},
+            {reinterpret_cast<std::uintptr_t>(records.data()), std::as_bytes(std::span(records))},
+            {reinterpret_cast<std::uintptr_t>(palettes.data()), std::as_bytes(std::span(palettes))},
+            {reinterpret_cast<std::uintptr_t>(extra.data()), std::as_bytes(std::span(extra))},
+        }};
+        const auto inputTable = Table;
+        const auto inputKeys = Keys;
+        const auto inputRecords = records;
+        const auto inputPalettes = palettes;
+        const auto inputExtra = extra;
+        auto result = Execute(device, code, Srt.data(), std::span(memory).first(extra.empty() ? 6u : 7u), 4u, Lanes, 64u);
+        Require(Table == inputTable && Keys == inputKeys && records == inputRecords && palettes == inputPalettes && extra == inputExtra, "nested image table: dispatch modified its input memory");
+        Require(std::all_of(Output.begin() + 4u * Lanes * 4u, Output.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: dispatch wrote past its output");
+        return result;
+    };
+    const std::array<std::uint32_t, 8> keys{0u, 0u, 0u, 1u, 1u, 0u, 1u, 1u};
+    std::copy(keys.begin(), keys.end(), Keys.begin());
+    Keys[8] = 3u;
+    const auto original = run();
+    Require(!Faulted(original), "nested image table: valid independent keys faulted:\n" + original.log);
+    Require(original.imageTableCount == 3u, "nested image table: duplicate descriptors did not share one image");
+    for (std::uint32_t group = 0; group < 4u; ++group) RequireRed(original, group, Lanes, texels[keys[group * 2u] + keys[group * 2u + 1u]], "nested image table independent keys");
+    Require(original.imageTableReadRanges.size() == 1u, "nested image table: missing read ranges");
+    const auto covers = [&](const void* pointer, std::size_t bytes) {
+        const auto address = reinterpret_cast<std::uintptr_t>(pointer);
+        return std::ranges::any_of(original.imageTableReadRanges[0], [&](const auto& range) { return address >= range.first && address - range.first <= range.second && bytes <= range.second - (address - range.first); });
+    };
+    for (std::uint32_t parent = 0; parent < 2u; ++parent) {
+        Require(covers(records[parent].data() + 40u, 16u) && covers(palettes[parent].data(), 64u), "nested image table: a V# or its palette is absent from the write-overlap ranges");
+    }
+    std::copy(images[0].begin(), images[0].end(), palettes[1].begin());
+    const auto edited = run();
+    Require(!Faulted(edited) && Group(edited, 2) == Group(original, 0) && Group(edited, 3) == Group(original, 3), "nested image table: changing only a child map retained a stale invocation");
+    Require(edited.artifactId == original.artifactId, "nested image table: editing a child map recompiled the shader");
+    std::copy(images[1].begin(), images[1].end(), palettes[1].begin());
+    Keys[0] = 2u;
+    const auto alias = run();
+    Require(!Faulted(alias) && Group(alias, 0) == Group(original, 0), "nested image table: an aliased parent changed the result");
+    std::copy(records[0].begin() + 40u, records[0].end(), records[1].begin() + 40u);
+    const auto moved = run();
+    Require(!Faulted(moved) && Group(moved, 2) == Group(original, 0) && Group(moved, 3) == Group(original, 1), "nested image table: replacing the nested V# retained stale texels");
+    Require(moved.artifactId == original.artifactId, "nested image table: moving a descriptor recompiled the shader");
+    Keys[0] = 3u;
+    const auto unmapped = run();
+    Require(Faulted(unmapped) && unmapped.log.find("unmapped") != std::string::npos, "nested image table: an unreadable parent did not fault:\n" + unmapped.log);
+    Require(std::all_of(unmapped.words.begin(), unmapped.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: a faulting dispatch published copied output");
+    Keys[0] = 0u;
+    Keys[1] = 2u;
+    const auto outside = run();
+    const auto outsideWords = Group(outside, 0);
+    Require(!Faulted(outside) && std::all_of(outsideWords.begin(), outsideWords.end(), [](auto word) { return word == 0u; }), "nested image table: a scalar load past the nested buffer did not read zeros");
+    Keys[1] = 0x08000000u;
+    const auto wrapped = run();
+    Require(!Faulted(wrapped) && Group(wrapped, 0) == Group(original, 0), "nested image table: the inner offset did not wrap at 32 bits");
+    Keys[1] = 0u;
+    records[0][43] |= 1u << 30u;
+    const auto notBuffer = run();
+    Require(Faulted(notBuffer) && notBuffer.log.find("not a buffer") != std::string::npos, "nested image table: a non-buffer parent was accepted:\n" + notBuffer.log);
+    records[0][43] &= ~(1u << 30u);
+    const auto refused = [&](const std::vector<std::uint32_t>& code, const char* what) {
+        bool rejected = false;
+        try { static_cast<void>(run(code)); }
+        catch (const std::runtime_error& error) { rejected = std::string(error.what()).find("not a valid runtime value") != std::string::npos; }
+        Require(rejected, std::string("nested image table: ") + what + " was not refused by resource planning");
+    };
+    auto shared = std::vector<std::uint32_t>(NestedRecordCode.begin(), NestedRecordCode.end());
+    shared.insert(shared.begin() + 30u, 0x7e0e0232u);
+    shared.insert(shared.begin() + 21u, {0xf4200c8cu, 0xfa000000u});
+    std::fprintf(stderr, "nested image table: checking shared V# refusal\n");
+    refused(shared, "a V# with another buffer consumer");
+    auto phi = std::vector<std::uint32_t>(NestedRecordCode.begin(), NestedRecordCode.end());
+    phi.insert(phi.begin() + 17u, {0xbf068011u, 0xbf840002u, 0xbeac03ffu, 0x000000eau});
+    std::fprintf(stderr, "nested image table: checking pointer Phi refusal\n");
+    refused(phi, "an unresolved pointer Phi");
+    std::fprintf(stderr, "nested image table: checking snapshot budget\n");
+    extra.resize((ShaderRecompiler::ImageTableAbi::MaxKeys + 1u) * 8u, 0u);
+    std::copy(images[0].begin(), images[0].end(), extra.begin());
+    const auto large = Buffer(extra.data(), static_cast<std::uint32_t>(extra.size() * sizeof(std::uint32_t)));
+    std::copy(large.begin(), large.end(), records[0].begin() + 40u);
+    Keys[0] = 0u;
+    Keys[1] = 0u;
+    const auto bounded = run();
+    Require(Faulted(bounded) && bounded.log.find("outside the snapshot") != std::string::npos, "nested image table: an uncaptured child did not fault:\n" + bounded.log);
+    Require(bounded.tableMap.size() < ShaderRecompiler::ImageTableAbi::MaxKeys + 1024u, "nested image table: the two levels produced an unbounded map");
+    Require(std::all_of(bounded.words.begin(), bounded.words.end(), [](auto word) { return word == 0xdeadbeefu; }), "nested image table: a dispatch outside the snapshot published copied output");
+    std::copy(large.begin(), large.end(), records[1].begin() + 40u);
+    const auto sharedBudget = run();
+    Require(!Faulted(sharedBudget) && sharedBudget.tableMap.size() < ShaderRecompiler::ImageTableAbi::MaxKeys + 1024u, "nested image table: equal V#s consumed the snapshot budget twice");
+    RequireRed(sharedBudget, 2u, Lanes, texels[0], "nested image table: aliased parent at the snapshot budget");
+    std::puts("nested image table independent keys, alias, descriptor replacement, faults, budget and refusals checked");
+}
+
 void RunSplitRecordTests(AgcDriver::VulkanDevice& device) {
     Fill();
     const auto floatImage = Image(FloatTexels.data(), Format32Float);
@@ -1420,7 +1561,7 @@ void RunGraphicsTests(AgcDriver::VulkanDevice& device) {
 
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
 #ifdef _WIN32
         _putenv_s("APS5_SRGB_SHADER_DECODE", "1");
@@ -1429,6 +1570,10 @@ int main() {
 #endif
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        if (argc == 2 && std::strcmp(argv[1], "--nested") == 0) {
+            RunNestedRecordTests(*device);
+            return 0;
+        }
         RunTests(*device);
         RunBorderSwizzleTests(*device);
         RunAnisoOverrideTests(*device);

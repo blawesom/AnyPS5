@@ -47,6 +47,7 @@ struct ImageTableColumnSnapshot {
     std::uint32_t keys = 0;
     std::uint32_t fault = 0;
     bool outside = false;
+    bool nested = false;
     std::vector<std::uint32_t> codes;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> readRanges;
 
@@ -55,6 +56,7 @@ struct ImageTableColumnSnapshot {
 
 struct ImageTableSnapshot {
     std::vector<ImageTableColumnSnapshot> tables;
+    std::vector<ImageTableColumnSnapshot> nested;
     std::vector<DescriptorValue> words;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
     std::uint64_t shader = 0;

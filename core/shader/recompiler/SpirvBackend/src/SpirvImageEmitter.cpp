@@ -1582,17 +1582,10 @@ struct TableWord {
     std::uint32_t poisoned = 0;
 };
 
-TableWord EmitTableWord(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t source, std::uint32_t table, std::size_t argument) {
-    auto& state = ctx.state;
-    const IrValue* handle = inst.Argument(argument)->Resolve();
-    const auto& sources = state.program.Resources().descriptorSources;
-    if (handle->ArgumentCount() == 0u || source >= sources.size() || !sources[source].tableColumn.has_value()) ctx.Fail(inst, "has an image table handle without its column");
-    const auto& column = *sources[source].tableColumn;
-    const auto offset = ctx.Def(handle->Argument(0));
+TableWord LookupTableWord(SpirvEmitterState& state, const TableColumn& column, std::uint32_t offset, std::uint32_t header, bool dynamicHeader = false) {
     const auto u32 = TypeU32(state);
     const auto boolean = TypeBool(state);
-    const auto header = ImageTableAbi::TableHeader(table);
-    const auto field = [&](std::uint32_t index) { return LoadTableMap(state, ConstantU32(state, header + index)); };
+    const auto field = [&](std::uint32_t index) { return dynamicHeader ? TableMapAt(state, header, index) : LoadTableMap(state, ConstantU32(state, header + index)); };
     const auto mapStart = field(ImageTableAbi::TableMapStart);
     const auto keys = field(ImageTableAbi::TableKeyCount);
     const auto sizeLow = field(ImageTableAbi::TableSizeLow);
@@ -1640,6 +1633,28 @@ TableWord EmitTableWord(SpirvValueEmitContext& ctx, const IrValue& inst, std::ui
     state.module.AddFunction(spv::OpCompositeExtract, u32, carry, low, 1u);
     word.addressHigh = Binary(state, spv::OpIAdd, u32, baseHigh, carry);
     word.poisoned = Binary(state, spv::OpINotEqual, boolean, Binary(state, spv::OpBitwiseAnd, u32, word.code, ConstantU32(state, ImageTableAbi::PoisonFlag)), ConstantU32(state, 0u));
+    return word;
+}
+
+TableWord EmitTableWord(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t source, std::uint32_t table, std::size_t argument) {
+    auto& state = ctx.state;
+    const IrValue* handle = inst.Argument(argument)->Resolve();
+    const auto& sources = state.program.Resources().descriptorSources;
+    if (handle->ArgumentCount() == 0u || source >= sources.size() || !sources[source].tableColumn.has_value()) ctx.Fail(inst, "has an image table handle without its column");
+    const auto& column = *sources[source].tableColumn;
+    const auto offset = ctx.Def(handle->Argument(0));
+    const auto header = ImageTableAbi::TableHeader(table);
+    const auto& parent = sources.at(column.heapSource).tableColumn;
+    if (!parent.has_value()) return LookupTableWord(state, column, offset, header);
+    if (!parent->buffer || handle->ArgumentCount() < 2u) ctx.Fail(inst, "has a nested image table without its buffer key");
+    const auto root = LookupTableWord(state, *parent, ctx.Def(handle->Argument(1)), header);
+    const auto u32 = TypeU32(state);
+    const auto childHeader = Select(state, u32, root.poisoned, ConstantU32(state, header), root.code);
+    auto word = LookupTableWord(state, column, offset, childHeader, true);
+    word.code = Select(state, u32, root.poisoned, root.code, word.code);
+    word.addressLow = Select(state, u32, root.poisoned, root.addressLow, word.addressLow);
+    word.addressHigh = Select(state, u32, root.poisoned, root.addressHigh, word.addressHigh);
+    word.poisoned = Binary(state, spv::OpLogicalOr, TypeBool(state), root.poisoned, word.poisoned);
     return word;
 }
 

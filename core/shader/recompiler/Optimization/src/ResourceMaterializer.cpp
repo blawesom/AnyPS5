@@ -375,6 +375,7 @@ struct ColumnRecords {
     std::uint32_t fault = 0;
     bool narrowed = false;
     bool outside = false;
+    bool nested = false;
     std::vector<RecordState> states;
     std::vector<std::uint32_t> words;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> readRanges;
@@ -547,6 +548,7 @@ struct WordsIndexTag {};
 struct ElementIndexTag {};
 struct PoisonIndexTag {};
 struct TableRecordsTag {};
+struct NestedTableRecordsTag {};
 
 class TableSnapshotter {
 public:
@@ -581,14 +583,15 @@ public:
         counters.tables.fetch_add(count, std::memory_order_relaxed);
         counters.nanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count()), std::memory_order_relaxed);
         if (TableStrict()) {
-            for (std::uint32_t table = 0; table < tables.tables.size(); table++) {
-                const auto& column = tables.tables[table];
+            const auto check = [&](const ImageTableColumnSnapshot& column, std::uint32_t table) {
                 const auto poisoned = std::find_if(column.codes.begin(), column.codes.end(), [](std::uint32_t code) { return (code & ImageTableAbi::PoisonFlag) != 0u && (code & ~ImageTableAbi::PoisonFlag) != static_cast<std::uint32_t>(PoisonReason::OutsideDomain); });
                 if (column.fault != 0u || poisoned != column.codes.end()) {
                     const auto reason = static_cast<PoisonReason>((column.fault != 0u ? column.fault : *poisoned) & ~ImageTableAbi::PoisonFlag);
                     throw std::runtime_error("image table " + std::to_string(table) + " at 0x" + hexText(column.base) + " holds a record that cannot be read (" + std::string(ImageTableAbi::PoisonReasonName(reason)) + "), and APS5_IMAGE_TABLE_STRICT is set");
                 }
-            }
+            };
+            for (std::uint32_t table = 0; table < tables.tables.size(); ++table) check(tables.tables[table], table);
+            for (std::uint32_t table = 0; table < tables.nested.size(); ++table) check(tables.nested[table], table);
         }
     }
 
@@ -779,6 +782,12 @@ private:
             records.fault = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(PoisonReason::Inactive));
             return records;
         }
+        if (plan.descriptorSources.at(column.heapSource).tableColumn.has_value()) {
+            const auto& parent = *plan.descriptorSources.at(column.heapSource).tableColumn;
+            if (column.buffer || !parent.buffer || plan.descriptorSources.at(parent.heapSource).tableColumn.has_value()) throw std::runtime_error("image table has an unsupported nested descriptor");
+            NestedColumn(column, records);
+            return records;
+        }
         if (column.address) {
             DescriptorValue pointer;
             walker.EvaluateDescriptorSource(plan, column.heapSource, runtime, pointer);
@@ -797,10 +806,18 @@ private:
                 return records;
             }
             records.records = ImageTableAbi::ScalarBufferRecords(column.addend, column.stride, column.offset + (column.indirect ? 4u : 0u), records.size);
-            if (records.size != 0u) tables.ranges.emplace_back(records.base, records.size);
+            if (records.size != 0u) {
+                tables.ranges.emplace_back(records.base, records.size);
+                if (column.buffer) records.readRanges.emplace_back(records.base, records.size);
+            }
         }
+        ReadColumn(column, records, ImageTableAbi::MaxKeys);
+        return records;
+    }
+
+    void ReadColumn(const TableColumn& column, ColumnRecords& records, std::uint32_t limit) {
         records.records = std::min(records.records, ImageTableAbi::KeyRecords(column.maxKey, column.stride));
-        records.keys = std::min(records.records, ImageTableAbi::MaxKeys);
+        records.keys = std::min(records.records, limit);
         records.outside = records.keys < records.records;
         records.states.assign(records.keys, RecordState::Read);
         if (!column.keyDomains.empty() && records.keys != 0u) {
@@ -820,7 +837,7 @@ private:
                 }
                 const std::uint64_t pointer = (static_cast<std::uint64_t>(Read(records.base + *highWord)) << 32u) | Read(records.base + *lowWord);
                 DescriptorValue value;
-                value.dwordCount = column.sampler ? 4u : 8u;
+                value.dwordCount = column.sampler || column.buffer ? 4u : 8u;
                 std::uint64_t first = std::numeric_limits<std::uint64_t>::max();
                 std::uint64_t past = 0;
                 for (std::uint32_t dword = 0; dword < column.dwordCount; dword++) {
@@ -838,8 +855,9 @@ private:
                 if (records.states[record] != RecordState::Read) continue;
                 records.words[record] = WordsIndex(value);
                 tables.ranges.emplace_back(first, past - first);
+                if (column.buffer) records.readRanges.emplace_back(first, past - first);
             }
-            return records;
+            return;
         }
         constexpr auto Unread = std::numeric_limits<std::uint32_t>::max();
         std::vector<std::uint32_t> whole(records.keys, Unread);
@@ -923,7 +941,7 @@ private:
         for (std::uint32_t record = 0; record < records.keys; record++) {
             if (records.states[record] != RecordState::Read) continue;
             DescriptorValue value;
-            value.dwordCount = column.sampler ? 4u : 8u;
+            value.dwordCount = column.sampler || column.buffer ? 4u : 8u;
             if (whole[record] != Unread) {
                 std::copy_n(read.begin() + whole[record], column.dwordCount, value.dwords.begin());
                 value.availableDwordMask = static_cast<std::uint8_t>((1u << column.dwordCount) - 1u);
@@ -950,45 +968,86 @@ private:
             }
         }
         records.readRanges.resize(ranges);
-        return records;
+        return;
     }
 
-    void Snapshot(std::uint32_t source, std::uint32_t table) {
-        const auto& column = *plan.descriptorSources.at(source).tableColumn;
-        const auto& records = Column(source);
-        auto& out = tables.tables.at(table);
+    ImageTableColumnSnapshot CopyRecords(const ColumnRecords& records) {
+        ImageTableColumnSnapshot out;
         out.base = records.base;
         out.size = records.size;
         out.records = records.records;
         out.keys = records.keys;
         out.fault = records.fault;
         out.outside = records.outside;
+        out.nested = records.nested;
         out.codes.assign(records.keys, 0u);
         out.readRanges = records.readRanges;
-        TableTrace trace{records.base, records.size, records.records, records.keys, 0u, records.narrowed};
         auto& counters = tableCounters();
         if (records.fault != 0u) counters.poison[records.fault & ~ImageTableAbi::PoisonFlag].fetch_add(1, std::memory_order_relaxed);
         for (std::uint32_t key = 0; key < records.keys; key++) {
+            PoisonReason reason;
             switch (records.states[key]) {
                 case RecordState::Read:
                     out.codes[key] = records.words[key];
                     continue;
-                case RecordState::OutsideDomain:
-                    out.codes[key] = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(PoisonReason::OutsideDomain));
-                    break;
-                case RecordState::Unmapped:
-                    out.codes[key] = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(PoisonReason::Unmapped));
-                    counters.poison[static_cast<std::size_t>(PoisonReason::Unmapped)].fetch_add(1, std::memory_order_relaxed);
-                    break;
-                case RecordState::Carried:
-                    out.codes[key] = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(PoisonReason::OffsetCarry));
-                    counters.poison[static_cast<std::size_t>(PoisonReason::OffsetCarry)].fetch_add(1, std::memory_order_relaxed);
-                    break;
+                case RecordState::OutsideDomain: reason = PoisonReason::OutsideDomain; break;
+                case RecordState::Unmapped: reason = PoisonReason::Unmapped; break;
+                case RecordState::Carried: reason = PoisonReason::OffsetCarry; break;
             }
-            trace.poison++;
+            out.codes[key] = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(reason));
+            if (reason != PoisonReason::OutsideDomain) counters.poison[static_cast<std::size_t>(reason)].fetch_add(1, std::memory_order_relaxed);
         }
-        counters.keys.fetch_add(records.keys, std::memory_order_relaxed);
-        if (TableTraced()) traceTable(plan, table, column, trace);
+        return out;
+    }
+
+    void NestedColumn(const TableColumn& column, ColumnRecords& records) {
+        records = Column(column.heapSource);
+        records.nested = true;
+        std::map<std::array<std::uint32_t, 8>, std::uint32_t> children;
+        std::uint32_t remaining = ImageTableAbi::MaxKeys;
+        for (std::uint32_t key = 0; key < records.keys; ++key) {
+            if (records.states[key] != RecordState::Read) continue;
+            const auto value = tables.words.at(records.words[key]);
+            if (value.dwordCount != 4u || value.availableDwordMask != 0x0fu) {
+                records.states[key] = RecordState::Unmapped;
+                continue;
+            }
+            if (const auto found = children.find(value.dwords); found != children.end()) {
+                records.words[key] = found->second;
+                continue;
+            }
+            ColumnRecords child;
+            const auto heap = decodeBufferDescriptor(value);
+            if (heap.Type() != 0u) {
+                child.fault = ImageTableAbi::PoisonCode(static_cast<std::uint32_t>(PoisonReason::NotBuffer));
+            } else {
+                child.base = heap.Base48();
+                child.size = heap.GetSize();
+                child.records = ImageTableAbi::ScalarBufferRecords(column.addend, column.stride, column.offset, child.size);
+                if (child.size != 0u) {
+                    tables.ranges.emplace_back(child.base, child.size);
+                    records.readRanges.emplace_back(child.base, child.size);
+                }
+                ReadColumn(column, child, remaining);
+                remaining -= child.keys;
+            }
+            const auto index = static_cast<std::uint32_t>(tables.nested.size());
+            tables.nested.push_back(CopyRecords(child));
+            children.emplace(value.dwords, index);
+            records.words[key] = index;
+        }
+    }
+
+    void Snapshot(std::uint32_t source, std::uint32_t table) {
+        const auto& column = *plan.descriptorSources.at(source).tableColumn;
+        const auto& records = Column(source);
+        auto& out = tables.tables.at(table);
+        out = CopyRecords(records);
+        tableCounters().keys.fetch_add(records.keys, std::memory_order_relaxed);
+        if (TableTraced()) {
+            const auto poison = static_cast<std::uint32_t>(std::count_if(out.codes.begin(), out.codes.end(), [](auto code) { return (code & ImageTableAbi::PoisonFlag) != 0u; }));
+            traceTable(plan, table, column, {records.base, records.size, records.records, records.keys, poison, records.narrowed});
+        }
     }
 
     const IrResourcePlan& plan;
@@ -1401,9 +1460,8 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
     };
     std::vector<bool> outside(count, false);
     DenseScratchMap records(threadScratch<DenseSlot, TableRecordsTag>(), tables.words.size());
-    const auto fill = [&](std::uint32_t resource, std::uint32_t table, bool sampler) {
-        const auto& column = tables.tables.at(table);
-        const auto header = Abi::TableHeader(table);
+    DenseScratchMap nestedRecords(threadScratch<DenseSlot, NestedTableRecordsTag>(), tables.nested.size());
+    const auto fill = [&](auto&& self, std::uint32_t resource, std::uint32_t table, bool sampler, const ImageTableColumnSnapshot& column, std::uint32_t header) -> void {
         out.map[header + Abi::TableKeyCount] = column.keys;
         out.map[header + Abi::TableSizeLow] = static_cast<std::uint32_t>(column.size);
         out.map[header + Abi::TableSizeHigh] = static_cast<std::uint32_t>(column.size >> 32u);
@@ -1415,17 +1473,32 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
         } else if (!sampler && (info.images[resource].tableOperation == TableOperation::Unsupported || info.runtimeImageModes[resource].empty())) {
             out.map[header + Abi::TableFault] = poison(resource, PoisonReason::UnsupportedOperation, nullptr);
         }
-        outside[table] = column.outside;
+        outside[table] = outside[table] || column.outside;
         const auto mapStart = static_cast<std::uint32_t>(out.map.size());
         out.map[header + Abi::TableMapStart] = mapStart;
         out.map.resize(out.map.size() + column.keys, 0u);
-        records.Clear();
+        if (column.nested) {
+            nestedRecords.Clear();
+        } else {
+            records.Clear();
+        }
         for (std::uint32_t key = 0; key < column.keys; key++) {
             const auto code = column.codes[key];
             std::uint32_t mapped = Abi::NullCode;
             if ((code & Abi::PoisonFlag) != 0u) {
                 const auto reason = static_cast<PoisonReason>(code & ~Abi::PoisonFlag);
                 mapped = reason == PoisonReason::OutsideDomain ? Abi::PoisonCode(Abi::OutsideDomainPoison) : poison(resource, reason, nullptr);
+            } else if (column.nested && out.map[header + Abi::TableFault] == 0u) {
+                if (const auto known = nestedRecords.Find(code)) {
+                    mapped = *known;
+                } else {
+                    const auto& child = tables.nested.at(code);
+                    if (child.nested) throw std::runtime_error("image table snapshot has unsupported recursive children");
+                    mapped = static_cast<std::uint32_t>(out.map.size());
+                    out.map.resize(out.map.size() + Abi::TableWords, 0u);
+                    nestedRecords.Set(code, mapped);
+                    self(self, resource, table, sampler, child, mapped);
+                }
             } else if (out.map[header + Abi::TableFault] == 0u) {
                 if (const auto known = records.Find(code)) {
                     mapped = *known;
@@ -1437,17 +1510,19 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
             }
             out.map[mapStart + key] = mapped;
         }
-        if (sampler && out.map[header + Abi::TableFault] == 0u) {
+        if (column.nested) {
+            out.map[header + Abi::TableOutsideCode] = poison(resource, PoisonReason::Unmapped, nullptr);
+        } else if (sampler && out.map[header + Abi::TableFault] == 0u) {
             DescriptorValue zero;
             zero.dwordCount = 4u;
             out.map[header + Abi::TableOutsideCode] = samplerRecord(resource, zero);
         }
     };
     for (std::uint32_t resource = 0; resource < info.images.size(); resource++) {
-        if (info.images[resource].table != NoTable) fill(resource, info.images[resource].table, false);
+        if (info.images[resource].table != NoTable) fill(fill, resource, info.images[resource].table, false, tables.tables.at(info.images[resource].table), Abi::TableHeader(info.images[resource].table));
     }
     for (std::uint32_t resource = 0; resource < info.samplers.size(); resource++) {
-        if (info.samplers[resource].table != NoTable) fill(resource, info.samplers[resource].table, true);
+        if (info.samplers[resource].table != NoTable) fill(fill, resource, info.samplers[resource].table, true, tables.tables.at(info.samplers[resource].table), Abi::TableHeader(info.samplers[resource].table));
     }
     out.map[Abi::HeaderElementCount] = static_cast<std::uint32_t>(out.elements.size());
     out.map[Abi::HeaderSamplerCount] = static_cast<std::uint32_t>(out.samplers.size());
