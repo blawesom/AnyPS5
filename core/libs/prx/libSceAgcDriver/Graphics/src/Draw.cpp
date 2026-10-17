@@ -2855,7 +2855,12 @@ DrawRecipeOutcome DrawWithRecipe(const Context& context, const State& state, con
     record.targetViews = recipe.targetViews;
     record.targets = std::move(targets);
     for (const auto& color : state.colors) record.targetSlices.push_back(color.arraySlice);
-    record.pushBytes = &recipe.pushBytes;
+    auto pushBytes = recipe.pushBytes;
+    if (recipe.pushStages != 0) {
+        pushBytes = AssemblePushConstants(shaders);
+        record.resources->PatchPushConstants(pushBytes);
+    }
+    record.pushBytes = &pushBytes;
     record.pushStages = recipe.pushStages;
     recordDraw(context, state, draw, shaders, inputs, record, outcome, timer, ownWaitedMs);
     if (profile) {

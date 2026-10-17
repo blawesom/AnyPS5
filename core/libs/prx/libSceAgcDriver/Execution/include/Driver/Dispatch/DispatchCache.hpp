@@ -44,6 +44,7 @@ struct DispatchVariant {
     std::uint32_t pushOffset = 0;
     std::vector<std::int8_t> runBases;
     std::uint64_t relocatableWords = 0;
+    std::shared_ptr<DispatchVariant> donor;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> shaderDataPatches;
     std::shared_ptr<const ShaderRecompiler::ShaderVertexStageInfo> vertexInfo;
 
