@@ -103,11 +103,6 @@ void GcnRangeTests() {
     Require(range && range->source == 0x280600830ull && range->destination == 0x240a00000ull && range->control == 0x2806008acull, "PS4 fill addresses kept bits above 44");
     Require(range->invocations == 0x7f80u * 64u && range->records == 0x1fe000u, "PS4 fill range changed");
     Require(range->UniformBytes(0x1fe000u, 0) == 8355840u, "PS4 render target clear does not cover the target");
-    Require(range->PatternBytes(0x1fe000u, 1) == 8355840u && range->PatternBytes(0x1fe000u, 3) == 8355840u, "PS4 periodic fill does not cover the target");
-    Require(!range->PatternBytes(0x1fe000u, 2) && !range->PatternBytes(0x1fe000u, 7), "a period that does not repeat in 16 bytes was accepted");
-    auto overlapping = *range;
-    overlapping.source = overlapping.destination + 8355840u - 4u;
-    Require(!overlapping.PatternBytes(0x1fe000u, 1), "a pattern source inside the filled range was accepted");
 }
 
 std::vector<std::uint32_t> Commands(std::span<const std::uint32_t> data, std::uint32_t threads, std::uint32_t wave, bool partial, bool indirect) {

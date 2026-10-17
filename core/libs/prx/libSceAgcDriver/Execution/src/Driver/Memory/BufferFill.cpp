@@ -228,24 +228,22 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         base = memoryFill->address;
         bytes = memoryFill->bytes;
     } else if (MatchesPatternFillKernel(code, userData, compute) || MatchesGcnPatternFillKernel(code, userData, compute)) {
-        const bool gcn = MatchesGcnPatternFillKernel(code, userData, compute);
-        const auto range = gcn ? DecodeGcnPatternFillRange(userData, packet) : DecodePatternFillRange(userData, packet);
+        const auto range = MatchesGcnPatternFillKernel(code, userData, compute) ? DecodeGcnPatternFillRange(userData, packet) : DecodePatternFillRange(userData, packet);
         if (!range) return false;
         if (range->invocations == 0) return true;
-        drainPendingInputWrites(queueId, {{range->control, 8}, {range->source, 16}});
+        drainPendingInputWrites(queueId, {{range->control, 8}, {range->source, 4}});
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
         inputLock.lock();
         recordLabelsForPacket(localDevice.get(), queueId);
         if (!GuestMemory::Accessible(reinterpret_cast<const void*>(range->control), 8)) return false;
         std::array<std::uint32_t, 2> control;
         GuestMemory::Read(range->control, std::as_writable_bytes(std::span(control)), 4);
-        const auto count = gcn ? range->PatternBytes(control[0], control[1]) : range->UniformBytes(control[0], control[1]);
+        const auto count = range->UniformBytes(control[0], control[1]);
         if (!count) return false;
         if (*count == 0) return true;
-        const auto period = control[1] + 1u;
-        if (!GuestMemory::Accessible(reinterpret_cast<const void*>(range->source), period * 4u)) return false;
-        GuestMemory::Read(range->source, std::as_writable_bytes(std::span(pattern).first(period)), 4);
-        for (std::uint32_t word = period; word < pattern.size(); ++word) pattern[word] = pattern[word % period];
+        if (!GuestMemory::Accessible(reinterpret_cast<const void*>(range->source), 4)) return false;
+        GuestMemory::Read(range->source, std::as_writable_bytes(std::span(pattern).first(1)), 4);
+        std::fill(pattern.begin() + 1, pattern.end(), pattern[0]);
         base = range->destination;
         bytes = *count;
     } else {

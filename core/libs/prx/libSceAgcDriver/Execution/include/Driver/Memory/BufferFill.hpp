@@ -31,14 +31,6 @@ struct PatternFillRange {
     std::uint64_t source, destination, control, invocations;
     std::uint32_t records;
 
-    [[nodiscard]] std::optional<std::size_t> PatternBytes(std::uint32_t count, std::uint32_t mask) const {
-        if (mask != 0 && mask != 1 && mask != 3) return std::nullopt;
-        const auto bytes = std::min({invocations, std::uint64_t{count}, std::uint64_t{records}}) * 4u;
-        if (destination % 16 != 0 || bytes % 16 != 0) return std::nullopt;
-        if (bytes != 0 && ((source < destination + bytes && destination < source + (mask + 1u) * 4u) || (control < destination + bytes && destination < control + 8))) return std::nullopt;
-        return static_cast<std::size_t>(bytes);
-    }
-
     [[nodiscard]] std::optional<std::size_t> UniformBytes(std::uint32_t count, std::uint32_t mask) const {
         if (mask != 0) return std::nullopt;
         const auto bytes = std::min({invocations, std::uint64_t{count}, std::uint64_t{records}}) * 4u;
