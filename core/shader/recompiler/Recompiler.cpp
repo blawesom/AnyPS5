@@ -585,7 +585,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.robustBufferAccess2 = request.target.robustBufferAccess2;
     targetOptions.float32FlushToZero = request.target.float32FlushToZero;
     targetOptions.gpuResolvedImages = gpuMode;
-    targetOptions.bdaRangeCache = request.target.gpuConstants;
+    targetOptions.bdaRangeCache = request.target.gpuConstants && request.shader.stage != ShaderStage::Compute;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
