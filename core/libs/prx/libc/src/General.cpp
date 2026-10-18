@@ -86,6 +86,17 @@ struct NameMatch {
 };
 
 #ifdef _WIN32
+bool CaseInsensitiveDirectoryWindows(const std::filesystem::path& directory) {
+    const auto handle = CreateFileW(directory.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    const std::unique_ptr<void, decltype(&CloseHandle)> owner(handle, &CloseHandle);
+    struct { ULONG flags; } information{};
+    constexpr auto caseSensitiveInfo = static_cast<FILE_INFO_BY_HANDLE_CLASS>(23);
+    return GetFileInformationByHandleEx(handle, caseSensitiveInfo, &information, sizeof(information)) &&
+        (information.flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR) == 0;
+}
+
 std::error_code MatchNamesWindows(const std::filesystem::path& directory, std::span<NameMatch> names) {
     for (auto& name : names) {
         const auto pattern = directory / name.name;
@@ -112,8 +123,8 @@ std::error_code MatchNamesWindows(const std::filesystem::path& directory, std::s
 
 std::error_code MatchNames(const std::filesystem::path& directory, std::span<NameMatch> names) {
 #ifdef _WIN32
-    return MatchNamesWindows(directory, names);
-#else
+    if (CaseInsensitiveDirectoryWindows(directory)) return MatchNamesWindows(directory, names);
+#endif
     std::error_code error;
     std::filesystem::directory_iterator entry(directory, error), end;
     for (; !error && entry != end; entry.increment(error)) {
@@ -125,7 +136,6 @@ std::error_code MatchNames(const std::filesystem::path& directory, std::span<Nam
         }
     }
     return error;
-#endif
 }
 
 std::filesystem::path MatchedModuleOrPath(const std::filesystem::path& path, const std::filesystem::path& relinked, const NameMatch& match) {
