@@ -1,0 +1,20 @@
+add_library(libSceCommonDialog SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_include_directories(libSceCommonDialog PRIVATE ${LIBS_INCLUDE_DIR})
+configure_windows_unwind(libSceCommonDialog)
+
+if(MINGW)
+    foreach(runtimeLinkFlag IN ITEMS -static-libgcc -static-libstdc++ -static)
+        string(REPLACE "${runtimeLinkFlag}" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+    endforeach()
+endif()
+
+if(BUILD_TESTING)
+    add_test_executable(guest_common_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestCommonDialog.cpp)
+    target_include_directories(guest_common_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_common_dialog_tests PRIVATE libSceCommonDialog)
+    add_test(NAME guest_common_dialog COMMAND guest_common_dialog_tests)
+    if(WIN32)
+        set_tests_properties(guest_common_dialog PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceCommonDialog>")
+    endif()
+endif()
