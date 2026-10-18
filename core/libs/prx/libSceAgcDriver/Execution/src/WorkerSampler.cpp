@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/WorkerSampler.hpp"
+#include "prx/libc/include/HostThread.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -268,7 +269,7 @@ struct ProcessSampler {
 void StartProcessSampler() {
     const char* path = std::getenv("APS5_SAMPLE_THREADS");
     if (path == nullptr) return;
-    processSamplerThread = std::jthread([path = std::string(path)](std::stop_token token) {
+    processSamplerThread = Libc::StartHostJThread([path = std::string(path)](std::stop_token token) {
         auto sampler = std::make_unique<ProcessSampler>();
         sampler->path = path;
         sampler->self = GetCurrentThreadId();
@@ -302,7 +303,7 @@ void StartWorkerSampler() {
         sampler->stackHigh = reinterpret_cast<std::uint64_t>(block->StackBase);
     }
     if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &sampler->target, THREAD_ALL_ACCESS, FALSE, 0)) throw std::system_error(GetLastError(), std::system_category(), "Duplicating sampler thread handle");
-    workerSamplerThread = std::jthread([sampler = std::move(sampler)](std::stop_token token) {
+    workerSamplerThread = Libc::StartHostJThread([sampler = std::move(sampler)](std::stop_token token) {
         auto flushed = std::chrono::steady_clock::now();
         while (!token.stop_requested()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
