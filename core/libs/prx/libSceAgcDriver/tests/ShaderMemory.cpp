@@ -7054,6 +7054,13 @@ void verifyVolumeArrayLoadMode() {
     require(modes[selected].dimension == RdnaImageDimension::Dim3D && !modes[selected].cube, "2D-array image load on a 3D T# did not select a volume runtime mode");
     image.fmaskCompatible = false;
     expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(image, descriptor, ResourceMaterializer::RuntimeImageModes(image))); }, "incompatible with the static runtime image interface", "2D-array image sample on a 3D T# was accepted");
+    image.volumeArraySampleCompatible = true;
+    const auto sampleModes = ResourceMaterializer::RuntimeImageModes(image);
+    const auto& sampled = sampleModes[ResourceMaterializer::RuntimeImageMode(image, descriptor, sampleModes)];
+    require(sampled.dimension == RdnaImageDimension::Dim3D && !sampled.cube, "2D-array image sample on a 3D T# did not select a volume runtime mode");
+    const DescriptorValue arrayDescriptor{{0x02466600u, 0x01400000u, 0u, 0xd0500204u, 1u, 0x00700000u, 0u, 0u}, 8u};
+    require(sampleModes[ResourceMaterializer::RuntimeImageMode(image, arrayDescriptor, sampleModes)].dimension == RdnaImageDimension::Dim2DArray, "2D-array image sample on a 2D-array T# no longer selects the 2D-array runtime mode");
+    image.volumeArraySampleCompatible = false;
     ImageResource store{};
     store.resourceClass = ImageResourceClass::Storage;
     store.dimension = RdnaImageDimension::Dim2DArray;
