@@ -1,6 +1,7 @@
 #include <elfpatcher/general/EntryStubBuilder.hpp>
 #include <elfpatcher/windows/WindowsEntryStubBuilder.hpp>
 #include <domain/Types.hpp>
+#include <elfpatcher/windows/WindowsImportBuilder.hpp>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -31,11 +32,17 @@ void stubTerminatesTheFrameChain() {
     require(bytesAt(stub, offset, {0x6a, 0x00, 0x6a, 0x00}), "the stub does not push a zero frame record");
     require(bytesAt(stub, offset, {0x48, 0x89, 0xe5}), "the stub does not point rbp at the zero frame record");
     require(bytesAt(stub, offset, {0x48, 0x31, 0xf6}), "the stub does not clear rsi");
+    require(bytesAt(stub, offset, {0x48, 0x83, 0xec, 0x10, 0x0f, 0xae, 0x1c, 0x24,
+                                   0xc7, 0x44, 0x24, 0x04, 0xc0, 0x9f, 0x00, 0x00,
+                                   0x0f, 0xae, 0x54, 0x24, 0x04}),
+            "the stub does not initialize MXCSR before guest entry");
     require(offset < stub.size() && stub[offset] == 0xe8, "the stub does not call the entry point");
     std::int32_t rel32 = 0;
     std::memcpy(&rel32, stub.data() + offset + 1, sizeof(rel32));
     offset += 5;
     require(stubVaddr + offset + static_cast<std::int64_t>(rel32) == entryVaddr, "the stub calls the wrong address");
+    require(bytesAt(stub, offset, {0x0f, 0xae, 0x14, 0x24, 0x48, 0x83, 0xc4, 0x10}),
+            "the stub does not restore host MXCSR after guest entry");
     require(bytesAt(stub, offset, {0x0f, 0x0b}) && offset == stub.size(), "the stub does not end with ud2 after the call");
 }
 
