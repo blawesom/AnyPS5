@@ -164,6 +164,28 @@ void nonAsciiPaths() {
     require(message.find(utf8Name) != std::string::npos, "a missing file names the path in UTF-8");
 }
 
+std::size_t stickModifierBindings(const Pad::InputConfiguration& configuration) {
+    std::size_t count = 0;
+    for (const auto& binding : configuration.bindings) count += binding.control == Pad::InputControl::StickModifier ? 1 : 0;
+    return count;
+}
+
+void stickModifier() {
+    useConfig("Cross = KEY:F\n");
+    auto configuration = Pad::LoadInputMapping();
+    require(stickModifierBindings(configuration) == 0, "no key is a stick modifier by default");
+    require(configuration.settings.stickModifierScale == 0.5, "the stick modifier scale defaults to 0.5");
+    useConfig("StickModifier = KEY:Z\nstickmodifier = MOUSE:X2\nStickModifierScale = 0.35\n");
+    configuration = Pad::LoadInputMapping();
+    require(stickModifierBindings(configuration) == 2, "StickModifier takes a key and a mouse button");
+    require(configuration.settings.stickModifierScale == 0.35, "the stick modifier scale is read");
+    require(rejects("StickModifier = WHEEL:Up\n"), "a wheel direction cannot be a stick modifier");
+    require(rejects("StickModifierScale = 0.04\n"), "a stick modifier scale below 0.05 is rejected");
+    require(rejects("StickModifierScale = 1.5\n"), "a stick modifier scale above 1 is rejected");
+    require(rejects("StickModifierScale = half\n"), "a non-numeric stick modifier scale is rejected");
+    require(rejects("StickModifierScale = 0.5\nStickModifierScale = 0.6\n"), "a stick modifier scale given twice is rejected");
+}
+
 void deadzoneOffMatchesRawSticks() {
     for (const std::int16_t axis : {std::int16_t{-32768}, std::int16_t{-20000}, std::int16_t{-1}, std::int16_t{0}, std::int16_t{1}, std::int16_t{1234}, std::int16_t{32767}}) {
         const auto stick = Pad::StickWithDeadzone(axis, axis, 0);
@@ -201,6 +223,7 @@ int main() try {
     mouseLookDefault();
     mouseLookParse();
     mouseLookReject();
+    stickModifier();
     nonAsciiPaths();
     deadzoneOffMatchesRawSticks();
     deadzoneShapesSticks();

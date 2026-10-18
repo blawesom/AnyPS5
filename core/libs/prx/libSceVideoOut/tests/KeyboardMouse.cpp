@@ -254,6 +254,43 @@ void testKeyboardSticksUnchanged() {
     check(samples[44].state.sticks[0] == 128, "released keys center the stick");
 }
 
+Pad::InputConfiguration withModifier(double scale) {
+    auto configuration = defaults();
+    configuration.bindings.push_back({SDL_SCANCODE_Z, Pad::MouseButton::None, Pad::InputControl::StickModifier});
+    configuration.bindings.push_back({SDL_SCANCODE_UNKNOWN, Pad::MouseButton::X2, Pad::InputControl::StickModifier});
+    configuration.settings.stickModifierScale = scale;
+    return configuration;
+}
+
+void testStickModifier() {
+    const std::vector<TimedEvent> events{
+        At(0.0, KeyEvent(SDL_SCANCODE_W, true)),
+        At(10.0, KeyEvent(SDL_SCANCODE_Z, true)),
+        At(20.0, KeyEvent(SDL_SCANCODE_D, true)),
+        At(30.0, KeyEvent(SDL_SCANCODE_A, true)),
+        At(40.0, KeyEvent(SDL_SCANCODE_Z, false)),
+        At(50.0, KeyEvent(SDL_SCANCODE_A, false)),
+        At(60.0, KeyEvent(SDL_SCANCODE_D, false)),
+        At(70.0, PadSimulation::ButtonEvent(SDL_BUTTON_X2, true)),
+        At(80.0, KeyEvent(SDL_SCANCODE_S, true)),
+        At(90.0, PadSimulation::ButtonEvent(SDL_BUTTON_X2, false))};
+    const auto samples = Simulate(withModifier(0.5), events, 1.0, 100.0);
+    check(samples[4].state.sticks[1] == 0, "keys tilt fully before the modifier is held");
+    check(samples[14].state.sticks[1] == 64 && samples[14].state.sticks[0] == 128, "the modifier halves the tilt of a held key");
+    check(samples[24].state.sticks[0] == 192 && samples[24].state.sticks[1] == 64, "the modifier halves a second axis");
+    check(samples[34].state.sticks[0] == 128, "opposite keys still cancel under the modifier");
+    check(samples[44].state.sticks[1] == 0 && samples[44].state.sticks[0] == 128, "letting go of the modifier restores the full tilt");
+    check(samples[74].state.sticks[1] == 64 && samples[74].state.sticks[0] == 128, "a modifier on a mouse button scales the held keys");
+    check(samples[84].state.sticks[1] == 128, "opposite keys cancel under a mouse button modifier");
+    check(samples[94].state.sticks[1] == 128, "opposite keys still cancel once the mouse button modifier is released");
+    const auto alone = Simulate(withModifier(0.5), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true))}, 1.0, 10.0);
+    check(alone.back().state.sticks[0] == 128 && alone.back().state.sticks[1] == 128, "the modifier alone moves no stick");
+    const auto quarter = Simulate(withModifier(0.25), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_D, true))}, 1.0, 10.0);
+    check(quarter.back().state.sticks[0] == 160, "the scale setting sets the tilt");
+    const auto full = Simulate(withModifier(1.0), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_D, true))}, 1.0, 10.0);
+    check(full.back().state.sticks[0] == 255, "a scale of 1 tilts fully");
+}
+
 void testWheelPress() {
     const auto samples = Simulate(defaults(), {At(0.0, PadSimulation::WheelEvent(1))}, 1.0, 200.0);
     const auto up = static_cast<std::uint32_t>(Pad::PadButton::Up);
@@ -348,6 +385,7 @@ int main() {
             {"vertical scale", testVerticalScale},
             {"mouse mode off", testMouseModeOff},
             {"keyboard sticks unchanged", testKeyboardSticksUnchanged},
+            {"stick modifier", testStickModifier},
             {"wheel press", testWheelPress},
             {"wheel and keys on focus loss", testWheelFocusLoss},
             {"focus loss releases the mouse", testFocusLossReleasesMouse},

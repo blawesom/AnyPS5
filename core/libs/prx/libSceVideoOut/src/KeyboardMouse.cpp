@@ -163,6 +163,7 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
     PadInputState state = controller;
     std::array<bool, 4> negative{};
     std::array<bool, 4> positive{};
+    bool modifier = false;
     for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
         if (!pressed[index]) continue;
         const auto& binding = configuration.bindings[index];
@@ -182,13 +183,15 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
             case InputControl::RightStickDown: positive[3] = true; break;
             case InputControl::TouchLeft: state.touchLeft = true; break;
             case InputControl::TouchRight: state.touchRight = true; break;
+            case InputControl::StickModifier: modifier = true; break;
             case InputControl::ToggleMouse: break;
             case InputControl::ToggleFullscreen: break;
             case InputControl::TogglePerformanceOverlay: break;
         }
     }
+    const double scale = modifier ? configuration.settings.stickModifierScale : 1.0;
     for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {
-        if (negative[axis] || positive[axis]) state.sticks[axis] = negative[axis] == positive[axis] ? 128 : negative[axis] ? 0 : 255;
+        if (negative[axis] || positive[axis]) state.sticks[axis] = StickByte((static_cast<double>(positive[axis]) - static_cast<double>(negative[axis])) * scale);
     }
     if (mouseMode) {
         const auto deflection = mouse.Deflection();

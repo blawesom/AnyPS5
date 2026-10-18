@@ -51,6 +51,7 @@ constexpr auto actions = std::array{
     InputAction{"RightStickDown", Pad::InputControl::RightStickDown, Pad::PadButton::None},
     InputAction{"TouchLeft", Pad::InputControl::TouchLeft, Pad::PadButton::None},
     InputAction{"TouchRight", Pad::InputControl::TouchRight, Pad::PadButton::None},
+    InputAction{"StickModifier", Pad::InputControl::StickModifier, Pad::PadButton::None},
     InputAction{"ToggleMouse", Pad::InputControl::ToggleMouse, Pad::PadButton::None},
     InputAction{"ToggleFullscreen", Pad::InputControl::ToggleFullscreen, Pad::PadButton::None},
     InputAction{"TogglePerformanceOverlay", Pad::InputControl::TogglePerformanceOverlay, Pad::PadButton::None}
@@ -136,7 +137,8 @@ enum class InputSetting {
     MouseDeadzoneOffset,
     MouseMaxSpeed,
     MouseSmoothingMs,
-    MouseDecayMs
+    MouseDecayMs,
+    StickModifierScale
 };
 
 struct InputSettingName {
@@ -153,7 +155,8 @@ constexpr auto settingNames = std::array{
     InputSettingName{"MouseDeadzoneOffset", InputSetting::MouseDeadzoneOffset},
     InputSettingName{"MouseMaxSpeed", InputSetting::MouseMaxSpeed},
     InputSettingName{"MouseSmoothingMs", InputSetting::MouseSmoothingMs},
-    InputSettingName{"MouseDecayMs", InputSetting::MouseDecayMs}
+    InputSettingName{"MouseDecayMs", InputSetting::MouseDecayMs},
+    InputSettingName{"StickModifierScale", InputSetting::StickModifierScale}
 };
 
 const InputSettingName* findSetting(std::string_view name) {
@@ -211,6 +214,7 @@ void applySetting(Pad::InputSettings& settings, InputSetting setting, std::strin
         case InputSetting::MouseMaxSpeed: settings.mouseMaxSpeed = parseNumber(value, "mouse max speed", 0.1, 10.0); break;
         case InputSetting::MouseSmoothingMs: settings.mouseSmoothingMs = parseNumber(value, "mouse smoothing", 0.0, 500.0); break;
         case InputSetting::MouseDecayMs: settings.mouseDecayMs = parseNumber(value, "mouse decay", 1.0, 1000.0); break;
+        case InputSetting::StickModifierScale: settings.stickModifierScale = parseNumber(value, "stick modifier scale", 0.05, 1.0); break;
     }
 }
 
