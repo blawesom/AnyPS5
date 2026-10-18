@@ -1276,9 +1276,14 @@ void stampWrittenRun(void* context, std::uintptr_t begin, std::uintptr_t end) {
 }
 
 #ifdef _WIN32
+std::atomic<FreshCollectHook> freshCollectHook{nullptr};
+
 bool collectWindowsWrites(StampRuns& runs, std::uint64_t first, std::uint64_t stop, bool armedOnly) {
     auto& tracker = runs.tracker;
     const bool fresh = runs.kind == StampKind::Fresh;
+    if (fresh) {
+        if (const auto hook = freshCollectHook.load(std::memory_order_acquire)) return hook(static_cast<std::uintptr_t>(first), static_cast<std::size_t>(stop - first), &stampWrittenRun, &runs);
+    }
     const auto collect = fresh ? &GuestArena::GuestArenaCollectFreshWrites_nid_postfix : armedOnly ? &GuestArena::GuestArenaCollectArmedWrites_nid_postfix : &GuestArena::GuestArenaCollectWrites_nid_postfix;
     static const bool singlePass = std::getenv("APS5_NO_SINGLE_PASS_COLLECT") == nullptr;
     const auto walk = [&](bool clear) {
@@ -1461,6 +1466,12 @@ void unwatchLocked(WriteTracker& tracker, std::uint64_t address, std::size_t byt
 void SetUnwatchHook(void (*hook)(std::uint64_t, std::size_t)) {
     unwatchHook.store(hook, std::memory_order_release);
 }
+
+#ifdef _WIN32
+void SetFreshCollectHook(FreshCollectHook hook) {
+    freshCollectHook.store(hook, std::memory_order_release);
+}
+#endif
 
 void Unwatch(std::uint64_t address, std::size_t bytes) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return;
