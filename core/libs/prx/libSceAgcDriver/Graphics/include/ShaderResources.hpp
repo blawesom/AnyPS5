@@ -322,6 +322,7 @@ private:
         std::uint32_t format = 0;
         int tileMode = 0;
         std::uint64_t dccAddress = 0;
+        bool imageTable = false;
     };
     std::vector<DescribedRange> describedRanges;
     struct Allocation {
