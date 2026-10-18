@@ -314,6 +314,7 @@ struct VulkanDevice::State {
     bool demoteToHelperInvocation = false;
     bool earlyFragmentSampleMaskTestBeforeSampleCounting = false;
     bool robustBufferAccess2 = false;
+    bool exactRobustLoads = false;
     // VK_EXT_descriptor_indexing with non-uniform image array indexing (bindless image tables in
     // graphics stages, and compute workgroups wider than a wave).
     bool descriptorIndexing = false;
@@ -1887,6 +1888,12 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         robustnessDriver = driver.driverID;
     }
     state->robustBufferAccess2 = robustness2.robustBufferAccess2 == VK_TRUE && enabled.robustBufferAccess == VK_TRUE && RobustBufferAccess2Usable(robustnessDriver);
+    if (state->robustBufferAccess2 && std::getenv("APS5_NO_EXACT_ROBUST_LOADS") == nullptr) {
+        VkPhysicalDeviceRobustness2PropertiesEXT robustnessLimits{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 queriedLimits{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &robustnessLimits};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &queriedLimits);
+        state->exactRobustLoads = robustnessLimits.robustStorageBufferAccessSizeAlignment == 1u;
+    }
     if (robustness2.nullDescriptor == VK_TRUE || state->robustBufferAccess2) {
         const bool nullDescriptor = robustness2.nullDescriptor == VK_TRUE;
         robustness2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
@@ -3567,6 +3574,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.fixedPushSlots = state->graphicsPipelineLibrary;
     target.registrationModules = state->graphicsPipelineLibrary;
     target.robustBufferAccess2 = state->robustBufferAccess2;
+    target.exactRobustLoads = state->exactRobustLoads;
     target.srgbDecodeFormats = state->srgbDecodeFormats & ~state->srgbCopyFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
     if (state->meshShader) {
@@ -3683,6 +3691,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.drawIndirectCount = state->drawIndirectCount;
     context.occlusionQueryPrecise = state->occlusionQueryPrecise;
     context.emptyBuffer = state->emptyBuffer ? state->emptyBuffer->Handle() : VK_NULL_HANDLE;
+    context.exactRobustLoads = state->exactRobustLoads;
     context.copiedWriters = state->copiedWriters.get();
     context.functions = state->functionsReady ? &state->deviceFunctions : nullptr;
     context.descriptorIndexing = state->descriptorIndexing;

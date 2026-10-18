@@ -565,6 +565,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.spannedWaves = request.target.spannedWaves;
     targetOptions.robustBufferAccess2 = request.target.robustBufferAccess2;
     targetOptions.float32FlushToZero = request.target.float32FlushToZero;
+    targetOptions.exactRobustLoads = request.target.exactRobustLoads;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
