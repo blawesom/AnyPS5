@@ -26,6 +26,10 @@ class Fixture:
         header = root / 'core/libs/prx/libc/include/HostThreadLocal.hpp'
         header.parent.mkdir(parents=True)
         header.write_text('struct FixtureThreadLocal {};\n', encoding='utf-8')
+        for extra in ('HostThread.hpp', 'general/AtomicSharedPtr.hpp'):
+            additional = root / 'core/libs/prx/libc/include' / extra
+            additional.parent.mkdir(parents=True, exist_ok=True)
+            additional.write_text('struct FixtureExtra {};\n', encoding='utf-8')
         self.guard = root / 'driver.cpp'
         self.guard.write_text('int fixture_driver;\n', encoding='utf-8')
         compiler = root / ('compiler.cmd' if os.name == 'nt' else 'compiler')

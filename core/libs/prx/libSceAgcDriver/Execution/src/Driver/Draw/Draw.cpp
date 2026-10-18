@@ -1118,7 +1118,7 @@ void Driver::drawStages(DrawTail& tail, const std::shared_ptr<VulkanDevice>& loc
         pushCursor += static_cast<std::uint32_t>(replacement->pushConstants.size());
     }
     for (const auto& reads : tail.decodeReads) {
-        for (const auto& read : reads) tail.memory.push_back({read.address, std::as_bytes(std::span(read.bytes))});
+        for (const auto& read : reads) tail.memory.push_back({read.address, read.Bytes()});
     }
     snapshots.clear();
     for (const auto& region : tail.memory) snapshots.push_back({region.guestAddress, region.bytes});
