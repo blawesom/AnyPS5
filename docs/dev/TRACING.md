@@ -55,6 +55,7 @@ Set a switch before starting the emulator. Unless noted, any value enables it. M
 | `APS5_TRACE_TEXTURES` | Sampled texture addresses, dimensions, format and nonzero-byte counts. |
 | `APS5_TRACE_UNREADABLE` | Call sites that check inaccessible guest-memory ranges or fail to read them. |
 | `APS5_TRACE_UPLOAD` | Reasons storage-image data is uploaded again. |
+| `APS5_TRACE_WATCH` | Ranges that leave the write watch (site, whether pending results were saved first), skipped saves, and the exclusion behind each pending unit stored without saved bytes. `unsaved` prints only exits that left watched blocks without a save, skipped saves and unsaved stores. |
 | `APS5_TRACE_BARRIERS` | Set to a positive integer to print that many skipped barrier decisions and their ranges. |
 
 ## Performance captures

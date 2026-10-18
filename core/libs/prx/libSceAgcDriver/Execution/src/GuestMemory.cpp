@@ -896,6 +896,42 @@ struct WriteTracker {
 #endif
     }
 
+    bool rangeWatched(std::uint64_t address, std::size_t bytes) const {
+#ifdef _WIN32
+        return coverage.Covers(address, bytes);
+#else
+        return GuestWriteWatch::GuestWriteWatchCovers_nid_postfix(static_cast<std::uintptr_t>(address), bytes);
+#endif
+    }
+
+    bool inArena(std::uint64_t address) const {
+#ifdef _WIN32
+        return address >= base && address - base < size;
+#else
+        return address < LeafCount * LeafBlocks * WriteBlockBytes;
+#endif
+    }
+
+    std::vector<std::uint64_t> watchedBlocks(std::uint64_t address, std::size_t bytes) const {
+        std::vector<std::uint64_t> result;
+#ifdef _WIN32
+        const std::uint64_t low = base;
+        const std::uint64_t high = base + size;
+#else
+        const std::uint64_t low = 0;
+        const std::uint64_t high = std::uint64_t{LeafCount} * LeafBlocks * WriteBlockBytes;
+#endif
+        const auto first = std::max<std::uint64_t>(address, low);
+        const auto stop = std::min<std::uint64_t>(address + bytes, high);
+        if (first >= stop) return result;
+        for (auto block = blockOf(first); block <= blockOf(stop - 1); ++block) {
+            const auto from = std::max<std::uint64_t>(first, blockBegin(block));
+            const auto to = std::min<std::uint64_t>(stop, blockBegin(block) + WriteBlockBytes);
+            if (rangeWatched(from, static_cast<std::size_t>(to - from))) result.push_back(block);
+        }
+        return result;
+    }
+
 #ifdef _WIN32
     void startHints(std::uint64_t address, std::size_t bytes) {
         const auto first = std::max<std::uint64_t>(address, base);
@@ -951,6 +987,7 @@ struct WriteTracker {
         }
     };
     std::unordered_map<std::uint64_t, DriverPieces> driverPieces;
+    std::unordered_map<std::uint64_t, ExclusionRecord> exclusions;
 
     struct CpuPages {
         std::array<std::uint32_t, WritePagesPerBlock> pages{};
@@ -1428,9 +1465,9 @@ namespace {
 
 std::atomic<void (*)(std::uint64_t, std::size_t)> unwatchHook{nullptr};
 
-void beforeUnwatch(std::uint64_t address, std::size_t bytes) {
+bool beforeUnwatch(std::uint64_t address, std::size_t bytes) {
     const auto hook = unwatchHook.load(std::memory_order_acquire);
-    if (hook == nullptr) return;
+    if (hook == nullptr) return false;
 #ifdef _WIN32
     std::uint64_t begin = 0;
     std::uint64_t end = 0;
@@ -1438,24 +1475,69 @@ void beforeUnwatch(std::uint64_t address, std::size_t bytes) {
         auto& tracker = Tracker();
         const auto lock = lockTracker(tracker);
         tracker.initialize();
-        if (!tracker.watched || !tracker.coverage.ExcludedSpan(address, bytes, &begin, &end)) return;
+        if (!tracker.watched || !tracker.coverage.ExcludedSpan(address, bytes, &begin, &end)) return false;
     }
     hook(begin, static_cast<std::size_t>(end - begin));
 #else
     hook(address, bytes);
 #endif
+    return true;
 }
 
-void unwatchLocked(WriteTracker& tracker, std::uint64_t address, std::size_t bytes) {
+bool watchTraceEnabled() {
+    static const bool trace = std::getenv("APS5_TRACE_WATCH") != nullptr;
+    return trace;
+}
+
+bool watchTraceEveryExit() {
+    static const bool every = watchTraceEnabled() && std::strcmp(std::getenv("APS5_TRACE_WATCH"), "unsaved") != 0;
+    return every;
+}
+
+void unwatchLocked(WriteTracker& tracker, std::uint64_t address, std::size_t bytes, WatchExit site, bool hooked) {
     if (!tracker.watched) return;
+    const bool trace = watchTraceEnabled();
+    std::vector<std::uint64_t> fresh;
+    if (trace) fresh = tracker.watchedBlocks(address, bytes);
 #ifdef _WIN32
     tracker.startHints(address, bytes);
     if (tracker.coverage.Exclude(address, bytes, GuestArena::GuestArenaCommitGeneration_nid_postfix())) unwatchSerial.fetch_add(1, std::memory_order_release);
 #else
     if (GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(reinterpret_cast<const void*>(address), bytes)) unwatchSerial.fetch_add(1, std::memory_order_release);
 #endif
+    if (!trace) return;
+    const std::uint64_t generation = tracker.generation;
+    for (const auto block : fresh) tracker.exclusions.insert_or_assign(block, ExclusionRecord{site, generation, hooked});
+    if (!watchTraceEveryExit() && (hooked || fresh.empty())) return;
+    std::fprintf(stderr, "[watch] exclude 0x%llx+0x%zx by %s hook %s new-blocks %zu generation %llu\n", static_cast<unsigned long long>(address), bytes, WatchExitName(site), hooked ? "ran" : "none", fresh.size(), static_cast<unsigned long long>(generation));
 }
 
+}
+
+const char* WatchExitName(WatchExit exit) {
+    switch (exit) {
+    case WatchExit::Unwatch: return "Unwatch";
+    case WatchExit::ImportLeave: return "ImportLeave";
+    case WatchExit::ImportStaysUncovered: return "ImportStaysUncovered";
+    case WatchExit::ImportStaysWalkFailed: return "ImportStaysWalkFailed";
+    case WatchExit::MarkWritten: return "MarkWritten";
+    }
+    return "unknown";
+}
+
+ExclusionView ExclusionAt(std::uint64_t address) {
+    auto& tracker = Tracker();
+    const auto lock = lockTracker(tracker);
+    tracker.initialize();
+    ExclusionView view;
+    if (!tracker.watched || !tracker.inArena(address)) return view;
+    const auto block = tracker.blockOf(address);
+#ifdef _WIN32
+    view.hostRegion = GuestArena::GuestArenaHostRegionOverlaps_nid_postfix(static_cast<std::uintptr_t>(tracker.blockBegin(block)), WriteBlockBytes);
+#endif
+    const auto found = tracker.exclusions.find(block);
+    if (found != tracker.exclusions.end()) view.record = found->second;
+    return view;
 }
 
 void SetUnwatchHook(void (*hook)(std::uint64_t, std::size_t)) {
@@ -1464,11 +1546,11 @@ void SetUnwatchHook(void (*hook)(std::uint64_t, std::size_t)) {
 
 void Unwatch(std::uint64_t address, std::size_t bytes) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return;
-    beforeUnwatch(address, bytes);
+    const bool hooked = beforeUnwatch(address, bytes);
     auto& tracker = Tracker();
     const auto lock = lockTracker(tracker);
     tracker.initialize();
-    unwatchLocked(tracker, address, bytes);
+    unwatchLocked(tracker, address, bytes, WatchExit::Unwatch, hooked);
 }
 
 void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
@@ -1498,10 +1580,11 @@ void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
 
 bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function<bool()>& import, bool staysWatched) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return import();
+    bool hooked = false;
     if (!staysWatched) {
         constexpr std::uint64_t page = 4096;
         const auto first = address & ~(page - 1);
-        beforeUnwatch(first, static_cast<std::size_t>(((address + bytes + page - 1) & ~(page - 1)) - first));
+        hooked = beforeUnwatch(first, static_cast<std::size_t>(((address + bytes + page - 1) & ~(page - 1)) - first));
     }
     auto& tracker = Tracker();
     auto lock = lockTracker(tracker);
@@ -1534,7 +1617,7 @@ bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function
     const bool before = covered && walkWrites(tracker, first, stop, StampKind::Cpu, true);
     const auto saveBytes = [&] {
         lock.unlock();
-        beforeUnwatch(first, static_cast<std::size_t>(stop - first));
+        hooked = beforeUnwatch(first, static_cast<std::size_t>(stop - first));
         lock.lock();
     };
     const bool savedEarly = staysWatched && !before;
@@ -1548,14 +1631,14 @@ bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function
     }
     if (!imported) return false;
     if (!staysWatched) {
-        if (!before || !walkWrites(tracker, first, stop, StampKind::ImportWindow, true)) unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first));
-        unwatchLocked(tracker, address, bytes);
+        if (!before || !walkWrites(tracker, first, stop, StampKind::ImportWindow, true)) unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first), WatchExit::ImportLeave, hooked);
+        unwatchLocked(tracker, address, bytes, WatchExit::ImportLeave, hooked);
         return true;
     }
     const WindowCopy window{first, saved, slots};
     if (!before || !walkWrites(tracker, first, stop, StampKind::Cpu, true, &window)) {
         if (!savedEarly) saveBytes();
-        unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first));
+        unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first), covered ? WatchExit::ImportStaysWalkFailed : WatchExit::ImportStaysUncovered, hooked);
     }
     return true;
 }
@@ -1686,7 +1769,7 @@ std::uint64_t MarkWritten(std::uint64_t address, std::size_t bytes) {
         const bool complete = GuestWriteWatch::GuestWriteWatchCollectFresh_nid_postfix(static_cast<std::uintptr_t>(blockFirst), static_cast<std::size_t>(blockStop - blockFirst), &stampWrittenRun, &runs);
 #endif
         if (!complete) {
-            unwatchLocked(tracker, blockFirst, static_cast<std::size_t>(blockStop - blockFirst));
+            unwatchLocked(tracker, blockFirst, static_cast<std::size_t>(blockStop - blockFirst), WatchExit::MarkWritten, false);
             tracker.noteUnstampedStore(address, address + bytes);
             return 0;
         }

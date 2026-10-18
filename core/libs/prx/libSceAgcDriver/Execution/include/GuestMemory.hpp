@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -60,6 +61,18 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
 // page tables and are reported with MarkWritten. Without write watching CollectWrites returns 0 and
 // UnchangedSince is always false, so callers fall back to comparing bytes.
 bool WriteWatched();
+enum class WatchExit : std::uint8_t { Unwatch, ImportLeave, ImportStaysUncovered, ImportStaysWalkFailed, MarkWritten };
+const char* WatchExitName(WatchExit exit);
+struct ExclusionRecord {
+    WatchExit site;
+    std::uint64_t generation;
+    bool hooked;
+};
+struct ExclusionView {
+    std::optional<ExclusionRecord> record;
+    bool hostRegion = false;
+};
+ExclusionView ExclusionAt(std::uint64_t address);
 void Unwatch(std::uint64_t address, std::size_t bytes);
 void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges);
 bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function<bool()>& import, bool staysWatched = true);

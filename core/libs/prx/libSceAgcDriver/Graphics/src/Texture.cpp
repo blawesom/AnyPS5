@@ -3544,6 +3544,14 @@ void StorageTexture::markLayersPending(std::uint32_t first, std::uint32_t count)
         anyUnsaved = anyUnsaved || unsaved[layer];
     }
     if (anyUnsaved && !GuestMemory::Watched(descriptor.baseAddress, static_cast<std::size_t>(guestBytes))) captureGuestBytes(&unsaved);
+    static const bool traceWatch = std::getenv("APS5_TRACE_WATCH") != nullptr;
+    if (traceWatch) {
+        if (layerPendingGeneration.size() != trackedLayers) layerPendingGeneration.assign(trackedLayers, 0);
+        const auto stamp = GuestMemory::TrackerGeneration();
+        for (std::uint32_t layer = first; layer < first + count; ++layer) {
+            if (!layerPending[layer]) layerPendingGeneration[layer] = stamp;
+        }
+    }
     for (std::uint32_t layer = first; layer < first + count; ++layer) layerPending[layer] = true;
     // Results of this image now cover the alias's results borrowed into these units: this image
     // stores them, the alias no longer has to (its results, unchanged since the borrow, are in
@@ -3759,8 +3767,10 @@ void StorageTexture::forgetSavedOver(std::uint64_t address, std::size_t bytes) {
     // Only these units' bytes changed under the saved copy. Units outside keep it: results still
     // pending there (the flush before the fill or copy stored only the units it overlaps) are
     // compared with it at their store when the memory is outside the write watch.
+    static const bool traceWatch = std::getenv("APS5_TRACE_WATCH") != nullptr;
     for (std::uint32_t unit = 0; unit < trackedLayers; ++unit) {
         if (layerBegin(unit) < address + bytes && address < layerBegin(unit) + layerBytes(unit)) {
+            if (traceWatch && layerPending[unit] && layerOriginal[unit]) std::fprintf(stderr, "[watch] forget image 0x%llx: unit %u 0x%llx+0x%llx pending, saved bytes cleared by 0x%llx+0x%zx\n", static_cast<unsigned long long>(descriptor.baseAddress), unit, static_cast<unsigned long long>(layerBegin(unit)), static_cast<unsigned long long>(layerBytes(unit)), static_cast<unsigned long long>(address), bytes);
             layerOriginal[unit] = false;
             cancelStoredSave(unit);
         }
@@ -3775,7 +3785,10 @@ void StorageTexture::saveBeforeUnwatch() {
     original.resize(static_cast<std::size_t>(guestBytes));
     comparedGuestBytes = {};
     for (const auto& [begin, end] : runs) GuestMemory::ReadCommittedUnsynced(descriptor.baseAddress + begin, std::span(original).subspan(static_cast<std::size_t>(begin), static_cast<std::size_t>(end - begin)));
-    for (const auto& [begin, end] : runs) GuestMemory::CollectWritesUncached(descriptor.baseAddress + begin, static_cast<std::size_t>(end - begin));
+    static const bool traceWatch = std::getenv("APS5_TRACE_WATCH") != nullptr;
+    for (const auto& [begin, end] : runs) {
+        if (GuestMemory::CollectWritesUncached(descriptor.baseAddress + begin, static_cast<std::size_t>(end - begin)) == 0 && traceWatch) std::fprintf(stderr, "[watch] save image 0x%llx: collect failed for 0x%llx+0x%llx\n", static_cast<unsigned long long>(descriptor.baseAddress), static_cast<unsigned long long>(descriptor.baseAddress + begin), static_cast<unsigned long long>(end - begin));
+    }
     constexpr std::uint64_t block = 65536;
     for (std::uint32_t unit = 0; unit < trackedLayers; ++unit) {
         if (!units[unit]) continue;
@@ -3792,7 +3805,10 @@ void StorageTexture::saveBeforeUnwatch() {
         const auto spanBlocks = static_cast<std::size_t>((end - spanBegin + block - 1) / block);
         const std::vector<std::uint64_t> generations(spanBlocks, layerGeneration[unit]);
         std::vector<std::uint8_t> changedBlocks(spanBlocks);
-        if (!GuestMemory::ChangedBlocks(begin, static_cast<std::size_t>(end - begin), generations, changedBlocks)) continue;
+        if (!GuestMemory::ChangedBlocks(begin, static_cast<std::size_t>(end - begin), generations, changedBlocks)) {
+            if (traceWatch) std::fprintf(stderr, "[watch] save image 0x%llx: unit %u 0x%llx+0x%llx skipped, blocks not tracked\n", static_cast<unsigned long long>(descriptor.baseAddress), unit, static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin));
+            continue;
+        }
         forgetKeptAtUnwatch(unit);
         for (auto at = spanBegin; at < end; at += block) {
             const auto from = std::max(at, begin);
@@ -5051,12 +5067,34 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
             cancelStoredSave(layer);
         }
     };
+    static const bool traceWatch = std::getenv("APS5_TRACE_WATCH") != nullptr;
+    static std::atomic<int> unsavedReports{0};
+    const auto reportUnsaved = [&](std::uint32_t layer) {
+        if (unsavedReports.fetch_add(1) >= 16) return;
+        const auto begin = layerBegin(layer);
+        const auto end = begin + layerBytes(layer);
+        std::array<std::size_t, 5> sites{};
+        std::size_t none = 0;
+        GuestMemory::ExclusionView firstView;
+        for (auto at = begin & ~(block - 1); at < end; at += block) {
+            const auto view = GuestMemory::ExclusionAt(at);
+            if (at == (begin & ~(block - 1))) firstView = view;
+            if (view.record) ++sites[static_cast<std::size_t>(view.record->site)];
+            else ++none;
+        }
+        std::string counts;
+        for (std::size_t site = 0; site < sites.size(); ++site) counts += std::string(GuestMemory::WatchExitName(static_cast<GuestMemory::WatchExit>(site))) + "=" + std::to_string(sites[site]) + " ";
+        std::string first = "no record";
+        if (firstView.record) first = std::string("site ") + GuestMemory::WatchExitName(firstView.record->site) + " generation " + std::to_string(firstView.record->generation) + " hooked " + (firstView.record->hooked ? "ran" : "none");
+        std::fprintf(stderr, "[watch] unsaved image 0x%llx+0x%llx blockUnits %d unit %u 0x%llx+0x%llx layerGeneration %llu layerPendingGeneration %llu reason %s blocks %sNone=%zu first-block %s host-region %d\n", static_cast<unsigned long long>(descriptor.baseAddress), static_cast<unsigned long long>(guestBytes), blockUnits ? 1 : 0, layer, static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin), static_cast<unsigned long long>(layerGeneration[layer]), static_cast<unsigned long long>(layer < layerPendingGeneration.size() ? layerPendingGeneration[layer] : 0), flushReason != nullptr ? flushReason : "none", counts.c_str(), none, first.c_str(), firstView.hostRegion ? 1 : 0);
+    };
     bool unsavedOutsideWatch = false;
     for (std::uint32_t layer = 0; layer < trackedLayers; ++layer) {
         if (!layers[layer]) continue;
         const auto begin = layerBegin(layer);
         const auto end = begin + layerBytes(layer);
         if (tracked ? layerGeneration[layer] == 0 : !compared[layer]) {
+            if (traceWatch && !tracked) reportUnsaved(layer);
             unsavedOutsideWatch = unsavedOutsideWatch || !tracked;
             keep.emplace_back(begin, end);
             continue;
