@@ -204,6 +204,7 @@ public:
             context.physical = devices[*selectedIndex];
             const auto& selected = deviceProperties[*selectedIndex];
             std::cout << "Vulkan device: " << selected.deviceName << '\n';
+            context.discreteGpu = selected.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
             const auto extensions = function<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
             Check(extensions(context.physical, nullptr, &count, nullptr), "vkEnumerateDeviceExtensionProperties");
             std::vector<VkExtensionProperties> available(count);

@@ -3653,6 +3653,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.pipelineCacheSynchronization = state->pipelineCache ? &state->pipelineCache->Synchronization() : nullptr;
     context.individuallyFreeDescriptorSets = state->individuallyFreeDescriptorSets;
     context.dmaBufImport = state->dmaBufImport;
+    context.discreteGpu = state->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
     context.sparseBinding = state->sparseBinding;
     context.queueFamily = state->queueFamily;
     context.sparseFamily = state->sparseFamily;
