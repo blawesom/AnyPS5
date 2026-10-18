@@ -71,8 +71,8 @@ public:
         GuestArena::GuestArenaReset_nid_postfix(data, AllocationBytes);
         GuestArena::GuestArenaRelease_nid_postfix(data, AllocationBytes);
 #else
-        munmap(data, AllocationBytes);
         GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(data, AllocationBytes);
+        munmap(data, AllocationBytes);
 #endif
     }
 
@@ -85,7 +85,7 @@ private:
 };
 
 template<typename TCall>
-void RequireColorGuard(TCall&& call) {
+void RequireColorGuard(TCall&& call, const char* failure) {
     bool guarded = false;
     try {
         call();
@@ -93,7 +93,7 @@ void RequireColorGuard(TCall&& call) {
         guarded = std::string_view(error.what()).find("multisampled color target") != std::string_view::npos;
         if (!guarded) throw;
     }
-    Require(guarded, "an image access accepted memory owned by a multisampled color target");
+    Require(guarded, failure);
 }
 
 void CheckCachedImage(AgcDriver::VulkanDevice& device, bool sampled, bool draw) {
@@ -153,8 +153,8 @@ void CheckCachedImage(AgcDriver::VulkanDevice& device, bool sampled, bool draw) 
     Require(MultisampleTargetView(context, target) != VK_NULL_HANDLE, "the overlapping multisample target has no view");
     device.SubmitRecorded(true);
     device.WaitIdle();
-    RequireColorGuard([&] { revalidate(); });
-    RequireColorGuard([&] { build(); });
+    RequireColorGuard([&] { revalidate(); }, "a cached image access accepted memory owned by a multisampled color target");
+    RequireColorGuard([&] { build(); }, "a fresh image access accepted memory owned by a multisampled color target");
     ClearMultisampleTargets(context.device);
     Require(revalidate(), "retiring the multisample targets did not restore image reuse");
 }

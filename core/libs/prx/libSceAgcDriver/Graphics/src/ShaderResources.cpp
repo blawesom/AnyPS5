@@ -4250,6 +4250,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record)
     // between the stages marks them uncompressed).
     const auto address = record.resource.baseAddress;
     const auto bytes = static_cast<std::size_t>(record.guestBytes);
+    RequireNoMultisampleColorTarget(address, bytes != 0 ? bytes : 1u, "a texture read");
     if (DepthSurfaceAt(address)) return nullptr;
     if (GuestMemory::CollectWrites(address, bytes) == 0) return nullptr;
     if (PendingStorageOverlaps(address, bytes, record.source.get())) return nullptr;
