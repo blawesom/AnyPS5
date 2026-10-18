@@ -7,6 +7,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/RangeIndex.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 // For the declaration of PendingStorageOverlaps, defined below.
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
@@ -1416,6 +1417,11 @@ StorageTexture::StorageTexture(const Context& context, TextureDetiler& detiler, 
 
 namespace {
 
+bool RefreshLookupsEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_REFRESH_LOOKUP_CACHE") == nullptr;
+    return enabled;
+}
+
 class PendingList {
 public:
     using iterator = std::vector<StorageTexture*>::iterator;
@@ -1429,11 +1435,19 @@ public:
     iterator erase(iterator it) {
         const auto next = textures.erase(it);
         changed();
+        if (RefreshLookupsEnabled()) index.Remove(*it, (*it)->Descriptor().baseAddress);
         return next;
     }
     void remove(const StorageTexture* texture) {
-        if (std::erase(textures, texture) != 0) changed();
+        if (std::erase(textures, texture) != 0) {
+            changed();
+            if (RefreshLookupsEnabled()) index.Remove(const_cast<StorageTexture*>(texture), texture->Descriptor().baseAddress, true);
+        }
     }
+    template <class Visit>
+    bool Overlapping(std::uint64_t address, std::uint64_t bytes, Visit&& visit) { return index.Overlapping(address, bytes, visit); }
+    template <class Visit>
+    bool StartingAt(std::uint64_t address, Visit&& visit) const { return index.StartingAt(address, visit); }
     bool MayOverlap(std::uint64_t address, std::size_t bytes) {
         if (indexed != version) rebuild();
         return !textures.empty() && Overlaps(ranges, address, bytes);
@@ -1475,7 +1489,8 @@ private:
         published.store(std::make_shared<const Snapshot>(Snapshot{version, ranges}), std::memory_order_release);
     }
     std::vector<StorageTexture*> textures;
-    Ranges ranges;
+    RangeIndex<StorageTexture*> index;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
     std::uint64_t version = 0;
     std::uint64_t indexed = ~std::uint64_t{0};
     std::atomic<std::uint64_t> changes{0};
@@ -2303,7 +2318,8 @@ bool StorageTexture::otherPendingOverlaps() const {
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
     const auto other = [&](const StorageTexture* texture) { return texture != this && texture->overlaps(descriptor.baseAddress, static_cast<std::size_t>(guestBytes)); };
-    return std::any_of(pending.textures.begin(), pending.textures.end(), other) || std::any_of(pending.flushing.begin(), pending.flushing.end(), other);
+    const bool pendingOverlap = RefreshLookupsEnabled() ? pending.textures.Overlapping(descriptor.baseAddress, guestBytes, [&](StorageTexture* texture) { return texture != this; }) : std::any_of(pending.textures.begin(), pending.textures.end(), other);
+    return pendingOverlap || std::any_of(pending.flushing.begin(), pending.flushing.end(), other);
 }
 
 bool StorageTexture::refreshProved() {
@@ -4837,9 +4853,17 @@ std::shared_ptr<StorageTexture> StorageTexture::pendingAlias() const {
     {
         auto& pending = Pending();
         std::lock_guard lock(pending.mutex);
-        for (auto* texture : pending.textures) {
-            if (texture == this || texture->descriptor.baseAddress != descriptor.baseAddress || texture->guestBytes != guestBytes || !texture->blockUnits) continue;
+        const auto consider = [&](StorageTexture* texture) {
+            if (texture == this || texture->descriptor.baseAddress != descriptor.baseAddress || texture->guestBytes != guestBytes || !texture->blockUnits) return;
             if (auto alive = texture->weak_from_this().lock()) candidates.push_back(std::move(alive));
+        };
+        if (RefreshLookupsEnabled()) {
+            pending.textures.StartingAt(descriptor.baseAddress, [&](StorageTexture* texture) {
+                consider(texture);
+                return false;
+            });
+        } else {
+            for (auto* texture : pending.textures) consider(texture);
         }
     }
     for (const auto& candidate : candidates) {
