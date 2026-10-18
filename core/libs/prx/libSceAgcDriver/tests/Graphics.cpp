@@ -3222,7 +3222,7 @@ void multisampleTests() {
     gridContext.sampleLocationGridSampleCounts = VK_SAMPLE_COUNT_2_BIT;
     expectFailure([&] { AgcDriver::Graphics::ValidateSampleLocations(gridContext, state); }, "VK_EXT_sample_locations");
     gridContext.sampleLocationSampleCounts |= VK_SAMPLE_COUNT_1_BIT;
-    expectFailure([&] { AgcDriver::Graphics::ValidateSampleLocations(gridContext, state); }, "2x2 sample location grid");
+    Require(AgcDriver::Graphics::ValidateSampleLocations(gridContext, state), "a one-sample pattern varying between pixels was refused on a device without a one-sample 2x2 grid");
     gridContext.sampleLocationGridSampleCounts |= VK_SAMPLE_COUNT_1_BIT;
     Require(AgcDriver::Graphics::ValidateSampleLocations(gridContext, state), "one-sample grid locations were refused on a device that supports them");
     for (std::uint32_t pixel = 0; pixel < 4; ++pixel) queue.context[0x2fe + pixel * 4u] = 0xcc44;
