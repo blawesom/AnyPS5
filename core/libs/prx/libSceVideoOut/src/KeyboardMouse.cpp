@@ -79,6 +79,51 @@ bool Pad::KeyboardMouse::MouseMode() const {
     return mouseMode;
 }
 
+Pad::KeyboardMouse::StickInput Pad::KeyboardMouse::stickInput() const {
+    std::array<bool, 4> negative{};
+    std::array<bool, 4> positive{};
+    bool modifier = false;
+    for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
+        if (!pressed[index]) continue;
+        switch (configuration.bindings[index].control) {
+            case InputControl::LeftStickLeft: negative[0] = true; break;
+            case InputControl::LeftStickRight: positive[0] = true; break;
+            case InputControl::LeftStickUp: negative[1] = true; break;
+            case InputControl::LeftStickDown: positive[1] = true; break;
+            case InputControl::RightStickLeft: negative[2] = true; break;
+            case InputControl::RightStickRight: positive[2] = true; break;
+            case InputControl::RightStickUp: negative[3] = true; break;
+            case InputControl::RightStickDown: positive[3] = true; break;
+            case InputControl::StickModifier: modifier = true; break;
+            default: break;
+        }
+    }
+    const double scale = modifier ? configuration.settings.stickModifierScale : 1.0;
+    StickInput input;
+    for (std::size_t axis = 0; axis < input.targets.size(); ++axis) {
+        input.targets[axis] = (static_cast<double>(positive[axis]) - static_cast<double>(negative[axis])) * scale;
+        input.held[axis] = negative[axis] || positive[axis];
+    }
+    return input;
+}
+
+bool Pad::KeyboardMouse::advanceAxes(Clock::time_point now) {
+    const double seconds = axesAdvanced && now > lastAxisAdvance ? std::chrono::duration<double>(now - lastAxisAdvance).count() : 0.0;
+    if (!axesAdvanced || now > lastAxisAdvance) lastAxisAdvance = now;
+    axesAdvanced = true;
+    const double ramp = configuration.settings.keyboardRampMs;
+    if (ramp <= 0.0 || seconds <= 0.0) return false;
+    const auto targets = stickInput().targets;
+    const double travel = seconds * 1000.0 / ramp;
+    bool moved = false;
+    for (std::size_t axis = 0; axis < stickAxes.size(); ++axis) {
+        const double before = stickAxes[axis];
+        stickAxes[axis] = targets[axis] > before ? std::min(targets[axis], before + travel) : std::max(targets[axis], before - travel);
+        moved = moved || stickAxes[axis] != before;
+    }
+    return moved;
+}
+
 bool Pad::KeyboardMouse::Advance(Clock::time_point now) {
     if (!advanced) {
         advanced = true;
@@ -89,14 +134,14 @@ bool Pad::KeyboardMouse::Advance(Clock::time_point now) {
         lastAdvance = now;
         if (mouseMode) mouse.Advance(seconds);
     }
-    bool released = false;
+    bool changed = advanceAxes(now);
     for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
         if (configuration.bindings[index].wheelDirection == 0 || !pressed[index] || now < wheelReleaseTimes[index]) continue;
         pressed[index] = false;
         wheelReleaseTimes[index] = {};
-        released = true;
+        changed = true;
     }
-    return released;
+    return changed;
 }
 
 void Pad::KeyboardMouse::SetMouseMode(bool enabled) {
@@ -111,6 +156,7 @@ void Pad::KeyboardMouse::SetTitleReadsMouse(bool reads) {
 void Pad::KeyboardMouse::Release() {
     std::fill(pressed.begin(), pressed.end(), false);
     std::fill(wheelReleaseTimes.begin(), wheelReleaseTimes.end(), Clock::time_point{});
+    stickAxes = {};
 }
 
 Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock::time_point now) {
@@ -130,6 +176,7 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
         int direction = (event.wheel.y > 0) - (event.wheel.y < 0);
         if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) direction = -direction;
         if (direction == 0) return requests;
+        advanceAxes(now);
         const auto releaseTime = now + std::chrono::milliseconds(WheelPressDurationMs);
         for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
             const auto& binding = configuration.bindings[index];
@@ -144,6 +191,7 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
     if (!keyboard && !mouseButton) return requests;
     if (keyboard && event.key.repeat != 0) return requests;
     if (event.type == SDL_MOUSEBUTTONDOWN && titleReadsMouse) return requests;
+    advanceAxes(now);
     const bool down = event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN;
     for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
         const auto& binding = configuration.bindings[index];
@@ -161,9 +209,6 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
 
 PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const {
     PadInputState state = controller;
-    std::array<bool, 4> negative{};
-    std::array<bool, 4> positive{};
-    bool modifier = false;
     for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
         if (!pressed[index]) continue;
         const auto& binding = configuration.bindings[index];
@@ -173,25 +218,26 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
                 if (binding.button == PadButton::L2) state.analogButtonsL2 = 255;
                 if (binding.button == PadButton::R2) state.analogButtonsR2 = 255;
                 break;
-            case InputControl::LeftStickLeft: negative[0] = true; break;
-            case InputControl::LeftStickRight: positive[0] = true; break;
-            case InputControl::LeftStickUp: negative[1] = true; break;
-            case InputControl::LeftStickDown: positive[1] = true; break;
-            case InputControl::RightStickLeft: negative[2] = true; break;
-            case InputControl::RightStickRight: positive[2] = true; break;
-            case InputControl::RightStickUp: negative[3] = true; break;
-            case InputControl::RightStickDown: positive[3] = true; break;
             case InputControl::TouchLeft: state.touchLeft = true; break;
             case InputControl::TouchRight: state.touchRight = true; break;
-            case InputControl::StickModifier: modifier = true; break;
-            case InputControl::ToggleMouse: break;
+            case InputControl::LeftStickLeft:
+            case InputControl::LeftStickRight:
+            case InputControl::LeftStickUp:
+            case InputControl::LeftStickDown:
+            case InputControl::RightStickLeft:
+            case InputControl::RightStickRight:
+            case InputControl::RightStickUp:
+            case InputControl::RightStickDown:
+            case InputControl::StickModifier:
+            case InputControl::ToggleMouse:
             case InputControl::ToggleFullscreen: break;
             case InputControl::TogglePerformanceOverlay: break;
         }
     }
-    const double scale = modifier ? configuration.settings.stickModifierScale : 1.0;
+    const auto input = stickInput();
+    const auto& axes = configuration.settings.keyboardRampMs > 0.0 ? stickAxes : input.targets;
     for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {
-        if (negative[axis] || positive[axis]) state.sticks[axis] = StickByte((static_cast<double>(positive[axis]) - static_cast<double>(negative[axis])) * scale);
+        if (input.held[axis] || axes[axis] != 0.0) state.sticks[axis] = StickByte(axes[axis]);
     }
     if (mouseMode) {
         const auto deflection = mouse.Deflection();

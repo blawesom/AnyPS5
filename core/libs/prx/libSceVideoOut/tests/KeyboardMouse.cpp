@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <stdexcept>
@@ -291,6 +292,44 @@ void testStickModifier() {
     check(full.back().state.sticks[0] == 255, "a scale of 1 tilts fully");
 }
 
+int byteDistance(std::uint8_t value, int expected) {
+    return std::abs(static_cast<int>(value) - expected);
+}
+
+void testKeyboardRamp() {
+    auto configuration = withModifier(0.5);
+    configuration.settings.keyboardRampMs = 100.0;
+    const std::vector<TimedEvent> events{At(0.0, KeyEvent(SDL_SCANCODE_W, true)), At(150.0, KeyEvent(SDL_SCANCODE_W, false))};
+    const auto samples = Simulate(configuration, events, 1.0, 400.0);
+    check(byteDistance(samples[20].state.sticks[1], 102) <= 1, "a ramp of 100 ms is a fifth of the way after 20 ms");
+    check(byteDistance(samples[50].state.sticks[1], 64) <= 1, "a ramp of 100 ms is halfway after 50 ms");
+    check(samples[119].state.sticks[1] == 0, "a ramp ends at full tilt");
+    for (std::size_t index = 2; index < 119; ++index) check(samples[index].state.sticks[1] <= samples[index - 1].state.sticks[1], "the stick only moves on while the key is held");
+    check(byteDistance(samples[199].state.sticks[1], 64) <= 1, "letting go ramps back at the same speed");
+    for (std::size_t index = 152; index < 259; ++index) check(samples[index].state.sticks[1] >= samples[index - 1].state.sticks[1], "the stick only moves back after the key is let go");
+    check(samples[259].state.sticks[1] == 128 && samples[259].state.sticks[0] == 128, "the stick ends centered");
+    const std::vector<TimedEvent> modified{At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_W, true)), PadSimulation::ReleaseAt(80.0)};
+    const auto scaled = Simulate(configuration, modified, 1.0, 120.0);
+    check(byteDistance(scaled[20].state.sticks[1], 102) <= 1, "a ramp toward a modified tilt moves at the ramp speed");
+    check(scaled[70].state.sticks[1] == 64, "a ramp toward a modified tilt stops at it");
+    check(scaled[99].state.sticks[1] == 128, "releasing every key centers a ramped stick at once");
+    const auto held = Simulate(configuration, {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_W, true))}, 1.0, 120.0);
+    check(held[99].state.sticks[1] == 64, "a ramp stops at the modified tilt");
+}
+
+void testRampKeepsAdvanceReporting() {
+    auto configuration = defaults();
+    configuration.settings.keyboardRampMs = 100.0;
+    Pad::KeyboardMouse keyboardMouse(configuration);
+    const auto start = Pad::KeyboardMouse::Clock::now();
+    keyboardMouse.Advance(start);
+    check(!keyboardMouse.Advance(start + std::chrono::milliseconds(5)), "nothing moves while no key is held");
+    keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_W, true), start + std::chrono::milliseconds(10));
+    check(keyboardMouse.Advance(start + std::chrono::milliseconds(20)), "a ramping stick asks for a new state");
+    keyboardMouse.Advance(start + std::chrono::milliseconds(200));
+    check(!keyboardMouse.Advance(start + std::chrono::milliseconds(210)), "a stick at its tilt asks for nothing");
+}
+
 void testWheelPress() {
     const auto samples = Simulate(defaults(), {At(0.0, PadSimulation::WheelEvent(1))}, 1.0, 200.0);
     const auto up = static_cast<std::uint32_t>(Pad::PadButton::Up);
@@ -386,6 +425,8 @@ int main() {
             {"mouse mode off", testMouseModeOff},
             {"keyboard sticks unchanged", testKeyboardSticksUnchanged},
             {"stick modifier", testStickModifier},
+            {"keyboard ramp", testKeyboardRamp},
+            {"ramp keeps advance reporting", testRampKeepsAdvanceReporting},
             {"wheel press", testWheelPress},
             {"wheel and keys on focus loss", testWheelFocusLoss},
             {"focus loss releases the mouse", testFocusLossReleasesMouse},

@@ -70,6 +70,7 @@ The same file also accepts these settings, each at most once, in the form `Setti
 | `MouseSmoothingMs` | Number from 0 to 500, the smoothing time constant in milliseconds. 0 follows every mouse report directly. | `10` |
 | `MouseDecayMs` | Number from 1 to 1000, the milliseconds without movement after which the stick is centered. | `30` |
 | `StickModifierScale` | Number from 0.05 to 1, the tilt of keyboard stick bindings while a `StickModifier` binding is held. | `0.5` |
+| `KeyboardRampMs` | Number from 0 to 2000, the milliseconds a keyboard stick binding takes to move the stick from the center to full tilt. 0 tilts at once. | `0` |
 
 ```ini
 LeftStickDeadzone = 12
@@ -77,7 +78,7 @@ RightStickDeadzone = 8
 MouseSensitivity = 2.5
 ```
 
-## Partial stick tilt
+## Analog keyboard sticks
 
 `StickModifier` has no built-in binding. While a key or mouse button bound to it is held, the keyboard stick bindings tilt the stick by `StickModifierScale` of its range instead of fully, for walking or fine aim. Controller sticks and the mouse stick are not affected, and opposite keys still cancel each other.
 
@@ -85,6 +86,8 @@ MouseSensitivity = 2.5
 StickModifier = KEY:Z
 StickModifierScale = 0.4
 ```
+
+With `KeyboardRampMs` above 0, keyboard stick bindings move the stick toward their tilt at a steady speed instead of jumping, and back to the center the same way when the keys are let go. Opposite keys held together move the stick to the center at the same speed.
 
 ## Mouse as the right stick
 

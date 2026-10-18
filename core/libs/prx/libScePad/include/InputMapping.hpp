@@ -27,6 +27,7 @@ struct InputSettings {
     double mouseSmoothingMs = 10.0;
     double mouseDecayMs = 30.0;
     double stickModifierScale = 0.5;
+    double keyboardRampMs = 0.0;
 };
 
 struct InputConfiguration {
