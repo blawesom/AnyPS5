@@ -199,6 +199,16 @@ void keyboardRamp() {
     require(rejects("KeyboardRampMs = 50\nKeyboardRampMs = 60\n"), "a keyboard ramp given twice is rejected");
 }
 
+void triggerRamp() {
+    useConfig("Cross = KEY:F\n");
+    require(Pad::LoadInputMapping().settings.triggerRampMs == 0.0, "the trigger ramp defaults to 0");
+    useConfig("TriggerRampMs = 80\n");
+    require(Pad::LoadInputMapping().settings.triggerRampMs == 80.0, "the trigger ramp is read");
+    require(rejects("TriggerRampMs = -5\n"), "a negative trigger ramp is rejected");
+    require(rejects("TriggerRampMs = 2500\n"), "a trigger ramp above 2000 is rejected");
+    require(rejects("TriggerRampMs = 10\ntriggerrampms = 20\n"), "a trigger ramp given twice is rejected");
+}
+
 void deadzoneOffMatchesRawSticks() {
     for (const std::int16_t axis : {std::int16_t{-32768}, std::int16_t{-20000}, std::int16_t{-1}, std::int16_t{0}, std::int16_t{1}, std::int16_t{1234}, std::int16_t{32767}}) {
         const auto stick = Pad::StickWithDeadzone(axis, axis, 0);
@@ -238,6 +248,7 @@ int main() try {
     mouseLookReject();
     stickModifier();
     keyboardRamp();
+    triggerRamp();
     nonAsciiPaths();
     deadzoneOffMatchesRawSticks();
     deadzoneShapesSticks();

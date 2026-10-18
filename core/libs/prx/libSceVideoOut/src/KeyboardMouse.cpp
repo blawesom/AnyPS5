@@ -4,6 +4,20 @@
 #include <cmath>
 #include <utility>
 
+namespace {
+
+bool slew(double& value, double target, double travel) {
+    const double before = value;
+    value = target > before ? std::min(target, before + travel) : std::max(target, before - travel);
+    return value != before;
+}
+
+std::uint8_t triggerByte(double value) {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
+}
+
+}
+
 Pad::MouseStick::MouseStick(const InputSettings& settings) : settings(settings) {}
 
 void Pad::MouseStick::Move(int deltaX, int deltaY) {
@@ -107,19 +121,32 @@ Pad::KeyboardMouse::StickInput Pad::KeyboardMouse::stickInput() const {
     return input;
 }
 
+std::array<double, 2> Pad::KeyboardMouse::triggerTargets() const {
+    std::array<double, 2> targets{};
+    for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
+        const auto& binding = configuration.bindings[index];
+        if (!pressed[index] || binding.control != InputControl::Button) continue;
+        if (binding.button == PadButton::L2) targets[0] = 1.0;
+        if (binding.button == PadButton::R2) targets[1] = 1.0;
+    }
+    return targets;
+}
+
 bool Pad::KeyboardMouse::advanceAxes(Clock::time_point now) {
     const double seconds = axesAdvanced && now > lastAxisAdvance ? std::chrono::duration<double>(now - lastAxisAdvance).count() : 0.0;
     if (!axesAdvanced || now > lastAxisAdvance) lastAxisAdvance = now;
     axesAdvanced = true;
-    const double ramp = configuration.settings.keyboardRampMs;
-    if (ramp <= 0.0 || seconds <= 0.0) return false;
-    const auto targets = stickInput().targets;
-    const double travel = seconds * 1000.0 / ramp;
+    if (seconds <= 0.0) return false;
     bool moved = false;
-    for (std::size_t axis = 0; axis < stickAxes.size(); ++axis) {
-        const double before = stickAxes[axis];
-        stickAxes[axis] = targets[axis] > before ? std::min(targets[axis], before + travel) : std::max(targets[axis], before - travel);
-        moved = moved || stickAxes[axis] != before;
+    if (configuration.settings.keyboardRampMs > 0.0) {
+        const auto targets = stickInput().targets;
+        const double travel = seconds * 1000.0 / configuration.settings.keyboardRampMs;
+        for (std::size_t axis = 0; axis < stickAxes.size(); ++axis) moved = slew(stickAxes[axis], targets[axis], travel) || moved;
+    }
+    if (configuration.settings.triggerRampMs > 0.0) {
+        const auto targets = triggerTargets();
+        const double travel = seconds * 1000.0 / configuration.settings.triggerRampMs;
+        for (std::size_t trigger = 0; trigger < triggerAxes.size(); ++trigger) moved = slew(triggerAxes[trigger], targets[trigger], travel) || moved;
     }
     return moved;
 }
@@ -157,6 +184,7 @@ void Pad::KeyboardMouse::Release() {
     std::fill(pressed.begin(), pressed.end(), false);
     std::fill(wheelReleaseTimes.begin(), wheelReleaseTimes.end(), Clock::time_point{});
     stickAxes = {};
+    triggerAxes = {};
 }
 
 Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock::time_point now) {
@@ -214,6 +242,7 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
         const auto& binding = configuration.bindings[index];
         switch (binding.control) {
             case InputControl::Button:
+                if (configuration.settings.triggerRampMs > 0.0 && (binding.button == PadButton::L2 || binding.button == PadButton::R2)) break;
                 state.buttons |= static_cast<std::uint32_t>(binding.button);
                 if (binding.button == PadButton::L2) state.analogButtonsL2 = 255;
                 if (binding.button == PadButton::R2) state.analogButtonsR2 = 255;
@@ -243,6 +272,10 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
         const auto deflection = mouse.Deflection();
         state.sticks[2] = StickByte(deflection[0]);
         state.sticks[3] = StickByte(deflection[1]);
+    }
+    if (configuration.settings.triggerRampMs > 0.0) {
+        state.analogButtonsL2 = std::max(state.analogButtonsL2, triggerByte(triggerAxes[0]));
+        state.analogButtonsR2 = std::max(state.analogButtonsR2, triggerByte(triggerAxes[1]));
     }
     if (state.analogButtonsL2 != 0) state.buttons |= static_cast<std::uint32_t>(PadButton::L2);
     if (state.analogButtonsR2 != 0) state.buttons |= static_cast<std::uint32_t>(PadButton::R2);

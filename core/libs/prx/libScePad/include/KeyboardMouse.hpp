@@ -62,6 +62,7 @@ private:
     };
 
     StickInput stickInput() const;
+    std::array<double, 2> triggerTargets() const;
     bool advanceAxes(Clock::time_point now);
 
     InputConfiguration configuration;
@@ -71,6 +72,7 @@ private:
     Clock::time_point lastAdvance{};
     Clock::time_point lastAxisAdvance{};
     std::array<double, 4> stickAxes{};
+    std::array<double, 2> triggerAxes{};
     bool advanced = false;
     bool axesAdvanced = false;
     bool mouseMode = false;

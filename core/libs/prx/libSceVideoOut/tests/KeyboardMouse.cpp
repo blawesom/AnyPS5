@@ -330,6 +330,33 @@ void testRampKeepsAdvanceReporting() {
     check(!keyboardMouse.Advance(start + std::chrono::milliseconds(210)), "a stick at its tilt asks for nothing");
 }
 
+void testTriggerRamp() {
+    const auto r2 = static_cast<std::uint32_t>(Pad::PadButton::R2);
+    const std::vector<TimedEvent> events{At(0.0, PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, true)), At(150.0, PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, false))};
+    const auto instant = Simulate(defaults(), events, 1.0, 10.0);
+    check(instant[0].state.analogButtonsR2 == 255 && (instant[0].state.buttons & r2) != 0, "without a ramp a press is full at once");
+    auto configuration = defaults();
+    configuration.settings.triggerRampMs = 100.0;
+    const auto samples = Simulate(configuration, events, 1.0, 400.0);
+    check(samples[0].state.analogButtonsR2 == 0 && (samples[0].state.buttons & r2) == 0, "a ramped press starts at 0");
+    check(byteDistance(samples[50].state.analogButtonsR2, 128) <= 2 && (samples[50].state.buttons & r2) != 0, "a ramp of 100 ms is halfway after 50 ms");
+    for (std::size_t index = 2; index < 119; ++index) check(samples[index].state.analogButtonsR2 >= samples[index - 1].state.analogButtonsR2, "the trigger only presses on while the button is held");
+    check(samples[119].state.analogButtonsR2 == 255, "a ramp ends at a full press");
+    check(byteDistance(samples[199].state.analogButtonsR2, 128) <= 2, "letting go ramps back at the same speed");
+    check(samples[259].state.analogButtonsR2 == 0 && (samples[259].state.buttons & r2) == 0, "the trigger ends released");
+    check(samples[119].state.analogButtonsL2 == 0, "the other trigger is left alone");
+    Pad::KeyboardMouse keyboardMouse(configuration);
+    const auto start = Pad::KeyboardMouse::Clock::now();
+    keyboardMouse.Advance(start);
+    keyboardMouse.HandleEvent(PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, true), start);
+    keyboardMouse.Advance(start + std::chrono::milliseconds(30));
+    PadInputState controller;
+    controller.analogButtonsR2 = 200;
+    check(keyboardMouse.Compose(controller).analogButtonsR2 == 200, "a controller trigger above the ramp is passed on");
+    controller.analogButtonsR2 = 10;
+    check(byteDistance(keyboardMouse.Compose(controller).analogButtonsR2, 77) <= 1, "a ramp above a controller trigger is passed on");
+}
+
 void testWheelPress() {
     const auto samples = Simulate(defaults(), {At(0.0, PadSimulation::WheelEvent(1))}, 1.0, 200.0);
     const auto up = static_cast<std::uint32_t>(Pad::PadButton::Up);
@@ -426,6 +453,7 @@ int main() {
             {"keyboard sticks unchanged", testKeyboardSticksUnchanged},
             {"stick modifier", testStickModifier},
             {"keyboard ramp", testKeyboardRamp},
+            {"trigger ramp", testTriggerRamp},
             {"ramp keeps advance reporting", testRampKeepsAdvanceReporting},
             {"wheel press", testWheelPress},
             {"wheel and keys on focus loss", testWheelFocusLoss},
