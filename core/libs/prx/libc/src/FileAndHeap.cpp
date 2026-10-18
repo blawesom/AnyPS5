@@ -99,6 +99,15 @@ static std::FILE* OpenNative(const std::filesystem::path& path, const std::strin
 #endif
 }
 
+static int CloseOwnedStream(std::FILE* stream) {
+#ifdef _WIN32
+    AppArchiveDetach_nid_no_patch(::_fileno(stream));
+#else
+    AppArchiveDetach_nid_no_patch(::fileno(stream));
+#endif
+    return std::fclose(stream);
+}
+
 #ifdef _WIN32
 static bool AppendThroughDescriptor(int descriptor) {
     const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
@@ -310,8 +319,10 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
         return nullptr;
     }
     std::filesystem::path fpath;
-    if (const int error = ResolvePathError_nid_no_patch(filename, fpath)) { errno = error; return nullptr; }
-    std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(OpenNative(fpath, parsed->native), std::fclose);
+    if (const int error = ResolvePathError_nid_no_patch(filename, fpath, false, true)) { errno = error; return nullptr; }
+    std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(
+        AppArchiveOnly_nid_no_patch(fpath) ? AppArchiveOpenStream_nid_no_patch(fpath, parsed->native.c_str()) : OpenNative(fpath, parsed->native),
+        CloseOwnedStream);
     if (!handle) {
         errno = GuestErrnoFromHost_nid_no_patch(errno);
         return nullptr;

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <type_traits>
+#include "prx/libc/include/AppArchive.hpp"
 #ifdef _WIN32
 #include <io.h>
 #include "prx/libc/include/FileLock.hpp"
@@ -82,6 +83,11 @@ public:
     GuestFilePrefix& GuestState() { return _guest; }
     bool Reopen(const std::filesystem::path& filename, const char* mode) {
         auto* previous = GetHandle();
+#ifdef _WIN32
+        AppArchiveDetach_nid_no_patch(::_fileno(previous));
+#else
+        AppArchiveDetach_nid_no_patch(::fileno(previous));
+#endif
         _guest = {};
         guestError = false;
 #ifdef _WIN32
@@ -144,7 +150,10 @@ public:
     int Close() {
         GetHandle();
 #ifdef _WIN32
+        AppArchiveDetach_nid_no_patch(::_fileno(_handle));
         GuestFileLockForget_nid_no_patch(::_fileno(_handle));
+#else
+        AppArchiveDetach_nid_no_patch(::fileno(_handle));
 #endif
         const int result = std::fclose(std::exchange(_handle, nullptr));
         _guest.flags = 0;
