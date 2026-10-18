@@ -421,8 +421,9 @@ private:
         Require(metadataValid->load(std::memory_order_acquire), "multisampled DCC metadata was released while its color target remains resident");
         static_cast<void>(MultisampledDccBytes(use));
         Require(use.address == target.address && use.dccAddress == target.dccAddress && use.dccControl == target.dccControl && use.dccAlphaOnMsb == target.dccAlphaOnMsb && use.dccPipeAligned == target.dccPipeAligned && use.cmaskAddress == target.cmaskAddress && use.cmaskBytes == target.cmaskBytes && use.tileMode == target.tileMode && use.elementBytes == target.elementBytes && use.pipeBankXor == target.pipeBankXor, "multisampled DCC target layout or metadata changed");
-        for (const auto& range : std::span(dccRanges).first(metadataRefilled ? 1u : dccRanges.size())) {
-            requireDccRange(GuestMemory::Watched(range.address, range.bytes), range, "multisampled DCC target reuse requires watched guest memory");
+        const auto ranges = std::span(dccRanges).first(metadataRefilled ? 1u : dccRanges.size());
+        for (const auto& range : ranges) requireDccRange(GuestMemory::Watched(range.address, range.bytes), range, "multisampled DCC target reuse requires watched guest memory");
+        for (const auto& range : ranges) {
             GuestMemory::CollectWritesUncached(range.address, range.bytes);
             requireDccRange(GuestMemory::UnchangedSince(range.address, range.bytes, range.generation) || !GuestMemory::StoredOver(range.address, range.bytes, range.generation), range, "writes to a resident multisampled DCC target or its metadata are not implemented");
             if (auto* recorder = Recorder::Active(); recorder != nullptr) requireDccRange(!recorder->PendingWriteOverlaps(range.address, range.bytes), range, "pending writes to a resident multisampled DCC target or its metadata are not implemented");
