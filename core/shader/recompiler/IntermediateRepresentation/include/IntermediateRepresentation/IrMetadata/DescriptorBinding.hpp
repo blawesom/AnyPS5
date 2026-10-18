@@ -43,6 +43,7 @@ struct IrBindingLayout {
     std::uint32_t memoryOffsetDword = 0;
     std::uint32_t memoryOffsetCount = 0;
     bool dispatchThreadLimit = false;
+    bool dispatchGroupInfo = false;
     std::uint32_t runtimeImageCount = 0;
     std::uint32_t runtimeStateDwords = 0;
     std::vector<std::uint32_t> userDataRegisters;
@@ -57,8 +58,11 @@ struct IrBindingLayout {
     [[nodiscard]] std::uint32_t RuntimeStateDword() const {
         return ImageMetadataDword() + runtimeImageCount * (sizeof(RuntimeAbi::ResourceMetadata) / sizeof(std::uint32_t));
     }
-    [[nodiscard]] std::uint32_t ShaderDataDwords() const {
+    [[nodiscard]] std::uint32_t DispatchGroupOffsetDword() const {
         return RuntimeStateDword() + runtimeStateDwords;
+    }
+    [[nodiscard]] std::uint32_t ShaderDataDwords() const {
+        return DispatchGroupOffsetDword() + (dispatchGroupInfo ? 3u : 0u);
     }
     [[nodiscard]] bool UsesPushData() const {
         return pushDataStartDword != PushData::NoStart;

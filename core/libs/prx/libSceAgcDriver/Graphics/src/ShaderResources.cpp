@@ -1889,7 +1889,8 @@ void ShaderResources::buildPrepare(std::span<const CompiledShader> shaders, cons
                     if (binding.role == ShaderRecompiler::DescriptorRole::ShaderData) {
                         ValidateRuntimeResources(shader, binding.guestDescriptor);
                     }
-                    item.allocations.push_back(addDataBuffer(binding.guestDescriptor));
+                    const bool dispatchGroupData = binding.role == ShaderRecompiler::DescriptorRole::ShaderData && shader.program->dispatchGroupInfo;
+                    item.allocations.push_back(addDataBuffer(binding.guestDescriptor, dispatchGroupData));
                     if (binding.role == ShaderRecompiler::DescriptorRole::ShaderData) shaderData = static_cast<std::int64_t>(item.allocations.back());
                 }
                 bindings.push_back(std::move(item));
@@ -4089,11 +4090,11 @@ std::string ShaderResources::Describe() const {
     return text;
 }
 
-std::size_t ShaderResources::addDataBuffer(std::span<const std::uint32_t> words) {
+std::size_t ShaderResources::addDataBuffer(std::span<const std::uint32_t> words, bool forceTransferDestination) {
     const auto size = words.size() * sizeof(std::uint32_t);
     Require(size <= context.limits.maxStorageBufferRange, "shader data buffer exceeds descriptor range limit");
     const bool refreshable = TemplateDataRefresh() && size <= MaxRefreshBytes;
-    auto buffer = std::make_unique<Buffer>(context, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | (refreshable ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0u));
+    auto buffer = std::make_unique<Buffer>(context, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | ((refreshable || forceTransferDestination) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0u));
     std::memcpy(buffer->Bytes().data(), words.data(), size);
     Allocation allocation{0, size, false, std::move(buffer)};
     if (refreshable) allocation.dataWords.assign(words.begin(), words.end());
@@ -4167,6 +4168,24 @@ bool ShaderResources::refreshData(VkCommandBuffer commands, const CompiledShader
     if (timing != Recorder::NoTiming) recorder->EndGpuTiming(timing, refreshedBytes);
     if (recorded) rehashDataWords();
     return recorded;
+}
+
+void ShaderResources::UpdateDispatchGroupOffset(VkCommandBuffer commands, const CompiledShader& shader, const std::array<std::uint32_t, 3>& offset) const {
+    Require(shader.program != nullptr, "missing compiled shader");
+    const auto& program = *shader.program;
+    if (!program.dispatchGroupInfo) return;
+    const auto found = std::ranges::find_if(program.bindings, [](const ShaderRecompiler::DescriptorBinding& binding) { return binding.role == ShaderRecompiler::DescriptorRole::ShaderData; });
+    Require(found != program.bindings.end(), "dispatch group offsets have no shader data binding");
+    const auto bindingIndex = static_cast<std::size_t>(found - program.bindings.begin());
+    Require(bindingIndex < bindings.size() && bindings[bindingIndex].allocations.size() == 1u, "dispatch group offset shader data binding is incomplete");
+    const auto allocationIndex = bindings[bindingIndex].allocations.front();
+    Require(allocationIndex < allocations.size(), "dispatch group offset allocation is out of range");
+    const auto& allocation = allocations[allocationIndex];
+    Require(!allocation.guest && allocation.buffer != nullptr && allocation.role == ShaderRecompiler::DescriptorRole::ShaderData, "dispatch group offset allocation is not shader data");
+    const auto byteOffset = static_cast<VkDeviceSize>(program.dispatchGroupOffsetDword) * sizeof(std::uint32_t);
+    const std::array<std::uint32_t, 3> values{offset[0], offset[1], offset[2]};
+    Require(byteOffset <= allocation.size && sizeof(values) <= allocation.size - byteOffset, "dispatch group offset exceeds shader data");
+    context.Resolved(&DeviceFunctions::cmdUpdateBuffer, "vkCmdUpdateBuffer")(commands, allocation.buffer->Handle(), byteOffset, sizeof(values), values.data());
 }
 
 void ShaderResources::writeDataWords(VkCommandBuffer commands, std::size_t allocation, std::span<const std::uint32_t> words) const {

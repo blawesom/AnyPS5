@@ -266,6 +266,7 @@ public:
     // buffer already holding the words is left alone). Returns whether anything was recorded. With
     // `recorder` the updates are one [gputime] range of class TemplateDataRefresh.
     bool RefreshData(VkCommandBuffer commands, const CompiledShader& shader, Recorder* recorder = nullptr);
+    void UpdateDispatchGroupOffset(VkCommandBuffer commands, const CompiledShader& shader, const std::array<std::uint32_t, 3>& offset) const;
     // Walks the write watch over every image surface of a completed object (no device lock: the
     // ranges are fixed by the build), so a Revalidate's collects on the same worker are memo hits.
     void PrecollectSurfaces() const;
@@ -427,7 +428,7 @@ private:
     // is its bufferAtomic (see GuestBufferMemory::AddWritable).
     std::size_t addGuestBuffer(std::span<const std::uint32_t> words, const ColorTarget* target, std::uint64_t indexAddress, std::size_t indexBytes, bool written, bool atomic, bool read, std::uint32_t extent);
     std::uint64_t guestBufferBytes(std::span<const std::uint32_t> words) const;
-    std::size_t addDataBuffer(std::span<const std::uint32_t> words);
+    std::size_t addDataBuffer(std::span<const std::uint32_t> words, bool forceTransferDestination = false);
     // Stage A: the layout entry of an image binding (samplers are taken at once, the sampler cache
     // locks itself); stage B looks the sampled textures and storage images up (resolveImageBinding).
     void addImageBinding(const ShaderRecompiler::DescriptorBinding& binding, VkShaderStageFlags flags);

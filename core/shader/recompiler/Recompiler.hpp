@@ -619,6 +619,8 @@ struct CompiledShaderArtifact {
     std::uint32_t shaderDataDwords = 0;
     std::uint32_t imageMetadataDword = 0;
     std::uint32_t runtimeImageCount = 0;
+    bool dispatchGroupInfo = false;
+    std::uint32_t dispatchGroupOffsetDword = 0;
     std::vector<std::uint32_t> runtimeImageResources;
     bool registrationModule = false;
     std::uint32_t bdaAbiVersion = 0;

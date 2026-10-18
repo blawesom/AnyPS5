@@ -596,6 +596,8 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     result.shaderDataDwords = bindings.layout.ShaderDataDwords();
     result.imageMetadataDword = bindings.layout.ImageMetadataDword();
     result.runtimeImageCount = bindings.layout.runtimeImageCount;
+    result.dispatchGroupInfo = bindings.layout.dispatchGroupInfo;
+    result.dispatchGroupOffsetDword = bindings.layout.DispatchGroupOffsetDword();
     result.hostSubgroupSize = HostSubgroupSize(request);
     result.fullSubgroups = emitted.fullSubgroups;
     result.vertexOffsetSgpr = program.Info().vertexOffsetSgpr;
@@ -913,6 +915,8 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         .shaderDataDwords = artifact.shaderDataDwords,
         .imageMetadataDword = artifact.imageMetadataDword,
         .runtimeImageCount = artifact.runtimeImageCount,
+        .dispatchGroupInfo = artifact.dispatchGroupInfo,
+        .dispatchGroupOffsetDword = artifact.dispatchGroupOffsetDword,
         .runtimeImageResources = artifact.runtimeImageResources,
         .registrationModule = artifact.registrationModule,
         .bdaAbiVersion = artifact.bdaAbiVersion,

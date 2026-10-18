@@ -101,6 +101,17 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
     if (kind == StageInputKind::DispatchThreadLimit) {
         return EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.DispatchThreadLimitDword() + component);
     }
+    if (kind == StageInputKind::WorkgroupId && state.program.Metadata().bindings.dispatchGroupInfo) {
+        const auto variable = InputVariableForKind(state, kind);
+        if (variable == 0u) return ConstantU32(state, 0u);
+        const auto value = state.module.AllocateId();
+        const auto adjusted = state.module.AllocateId();
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeU32(state)), value, variable, ConstantU32(state, component));
+        const auto loaded = state.module.AllocateId();
+        state.module.AddFunction(spv::OpLoad, TypeU32(state), loaded, value);
+        state.module.AddFunction(spv::OpIAdd, TypeU32(state), adjusted, loaded, EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.DispatchGroupOffsetDword() + component));
+        return adjusted;
+    }
     if (kind == StageInputKind::RasterPrimitive) {
         return state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::RasterPrimitive, static_cast<std::uint32_t>(RasterPrimitive::Triangle));
     }
@@ -137,6 +148,19 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
     const auto variable = InputVariableForKind(state, kind);
     if (variable == 0) {
         return ConstantU32(state, 0u);
+    }
+    if (kind == StageInputKind::GlobalInvocationId && state.program.Metadata().bindings.dispatchGroupInfo) {
+        const auto value = state.module.AllocateId();
+        const auto adjusted = state.module.AllocateId();
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeU32(state)), value, variable, ConstantU32(state, component));
+        const auto loaded = state.module.AllocateId();
+        state.module.AddFunction(spv::OpLoad, TypeU32(state), loaded, value);
+        const auto* workgroup = ShaderWorkgroupInputFor(state);
+        if (workgroup == nullptr) throw std::runtime_error("workgroup input info is missing for a global invocation builtin");
+        const auto offset = EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.DispatchGroupOffsetDword() + component);
+        const auto threads = EmitBinaryU32(state, spv::OpIMul, offset, ConstantU32(state, std::max(workgroup->threadsNum[component], 1u)));
+        state.module.AddFunction(spv::OpIAdd, TypeU32(state), adjusted, loaded, threads);
+        return adjusted;
     }
     if (kind == StageInputKind::FrontFacing) {
         const auto value = state.module.AllocateId();
