@@ -70,9 +70,9 @@ void buildGraph(std::span<const std::uint8_t> text, VirtualAddress textVaddr, Vi
 
         VirtualAddress va = worklist.front();
         worklist.pop();
+        const VirtualAddress blockEntry = va;
 
-        while (va >= textVaddr && va - textVaddr < text.size() && !reachable.contains(va) && !(isData && isData(va))) {
-            std::size_t bufOff = static_cast<std::size_t>(va - textVaddr);
+        while (va >= textVaddr && va - textVaddr < text.size() && (va == blockEntry || va - textVaddr < codeSize) && !reachable.contains(va) && !(isData && isData(va))) {            std::size_t bufOff = static_cast<std::size_t>(va - textVaddr);
             std::size_t available = text.size() - bufOff;
             if (available == 0) throw RelinkerException("CFG: zero available bytes at target", va);
 
