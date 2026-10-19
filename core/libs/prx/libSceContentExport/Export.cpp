@@ -151,4 +151,24 @@ int APS5_VABI sceContentExportTerm(void) {
     return 0;
 }
 
+int APS5_VABI sceContentExportFromFileWithContentIdList() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentExportFromFileWithTitleIdList() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentExportInit(void* init_param) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentExportValidateContents() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

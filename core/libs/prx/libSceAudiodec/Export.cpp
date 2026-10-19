@@ -247,4 +247,19 @@ int32_t APS5_VABI sceAudiodecDecode(int32_t handle, AudiodecCtrl* ctrl) {
     return 0;
 }
 
+int APS5_VABI sceAudiodecDecode2() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudiodecDecode2WithPriority() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudiodecDecodeWithPriority() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

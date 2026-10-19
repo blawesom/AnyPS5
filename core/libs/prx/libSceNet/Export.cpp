@@ -2854,4 +2854,39 @@ int APS5_VABI sceNetEmulationGet(void) {
     return 0;
 }
 
+int APS5_VABI sceNetBind(int socket, const void* addr, uint32_t addrlen) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetEtherStrton(const char* str, void* address) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+uint32_t APS5_VABI sceNetHtonl(uint32_t host32) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+uint16_t APS5_VABI sceNetHtons(uint16_t host16) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetInit() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+uint32_t APS5_VABI sceNetNtohl(uint32_t net32) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+uint16_t APS5_VABI sceNetNtohs(uint16_t net16) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

@@ -1076,4 +1076,29 @@ int APS5_VABI scePadControllerUpdateTerm(void) {
     return 0;
 }
 
+int APS5_VABI scePadClose(int handle) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePadGetInfo(void* info) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePadInit() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePadOpen(int user_id, int type, int index, const void* param) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePadRead(int handle, void* data, int num) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
