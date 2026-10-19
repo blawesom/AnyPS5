@@ -219,7 +219,7 @@ int main() {
             if (fixture.pixel) upgraded.insert(upgraded.begin() + 258u, {0u, 0u, 0u});
             if (fixture.pixel) InsertPixelDefaultsAfterFrontFace(upgraded);
             if (fixture.tessellation) upgraded.insert(upgraded.end() - 35u, 5u, 0u);
-            upgraded.insert(upgraded.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+            upgraded.insert(upgraded.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
             Require(serializer.Serialize(request) == EncodeBase64(upgraded));
             auto truncated = bytes;
             truncated.pop_back();
@@ -259,7 +259,7 @@ int main() {
                 layered.insert(layered.begin() + 259u, {0u, 0u});
                 InsertPixelDefaultsAfterFrontFace(layered);
                 if (fixture.tessellation) layered.insert(layered.end() - 35u, 5u, 0u);
-                layered.insert(layered.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+                layered.insert(layered.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
                 Require(serializer.Serialize(layerReplay.request) == EncodeBase64(layered));
             }
         }
@@ -284,7 +284,7 @@ int main() {
             InsertMeshBarycentricFlag(bytes);
             bytes.insert(bytes.begin() + 259u, {0u, 0u});
             InsertPixelDefaultsAfterFrontFace(bytes);
-            bytes.insert(bytes.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+            bytes.insert(bytes.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
             Require(serializer.Serialize(replay.request) == EncodeBase64(bytes));
 
             auto truncated23 = DecodeBase64(encoded23);
@@ -409,7 +409,7 @@ int main() {
                 InsertMeshBarycentricFlag(upgraded);
                 if (fixture.pixel) upgraded.insert(upgraded.begin() + 259u, {0u, 0u});
                 if (fixture.pixel) InsertPixelDefaultsAfterFrontFace(upgraded);
-                upgraded.insert(upgraded.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+                upgraded.insert(upgraded.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
                 Require(serializer.Serialize(request) == EncodeBase64(upgraded));
                 for (const bool dither : {false, true}) {
                     if (!fixture.pixel && dither) continue;
@@ -425,7 +425,7 @@ int main() {
                         main25.insert(main25.begin() + 260u, 0u);
                         InsertPixelDefaultsAfterFrontFace(main25);
                     }
-                    main25.insert(main25.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+                    main25.insert(main25.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
                     Require(serializer.Serialize(replay25.request) == EncodeBase64(main25));
                 }
             }
@@ -489,9 +489,16 @@ int main() {
         Require(stencilOperationValue < version35.end() && *stencilOperationValue == 0u);
         version35.erase(stencilOperationValue);
         version35[4] = 35u;
-        version35.pop_back();
+        version35.resize(version35.size() - 2u);
         const auto replay35 = serializer.Deserialize(EncodeBase64(version35));
         Require(replay35.request.target.spannedWaves == spanned && !replay35.request.target.float32FlushToZero);
+        request.target.spannedAnySubgroup = spanned;
+        Require(serializer.Deserialize(serializer.Serialize(request)).request.target.spannedAnySubgroup == spanned);
+        auto version37 = DecodeBase64(serializer.Serialize(request));
+        version37[4] = 37u;
+        version37.pop_back();
+        const auto replay37 = serializer.Deserialize(EncodeBase64(version37));
+        Require(replay37.request.target.float32FlushToZero && !replay37.request.target.spannedAnySubgroup);
     }
 
     return 0;

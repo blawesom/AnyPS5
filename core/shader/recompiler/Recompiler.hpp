@@ -287,6 +287,7 @@ struct SpirvTarget {
     bool vertexSubgroups = true;
     bool float16DenormPreserve = false;
     bool spannedWaves = false;
+    bool spannedAnySubgroup = false;
     bool robustBufferAccess2 = false;
     bool depthRangeRemap = false;
     bool float32FlushToZero = false;

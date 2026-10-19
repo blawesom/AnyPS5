@@ -67,6 +67,7 @@ struct ArenaAllocator {
 };
 
 using Instruction = std::vector<std::uint32_t, ArenaAllocator<std::uint32_t>>;
+using SpirvInstructions::VisitIdOperands;
 
 spv::Op Opcode(const Instruction& instruction) {
     return instruction.empty() ? spv::OpNop : static_cast<spv::Op>(instruction[0] & 0xffffu);
