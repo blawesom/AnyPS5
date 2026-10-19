@@ -258,14 +258,4 @@ std::int32_t APS5_VABI VrTracker2Unknown07() {
     return 0;
 }
 
-int APS5_VABI sceVrTracker2GetControllerImage() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceVrTracker2IrGetDebugRawImage() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 }

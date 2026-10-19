@@ -328,11 +328,6 @@ int APS5_VABI sceRudpGetLocalInfo() {
     return 0;
 }
 
-int APS5_VABI sceRudpInit() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceRudpListen() {
     NotImplemented_nid_no_patch(__func__);
     return 0;

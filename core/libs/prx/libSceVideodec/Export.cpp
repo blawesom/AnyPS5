@@ -26,14 +26,4 @@ int APS5_VABI sceVideodecReset(void* pCtrlIn) {
     return 0;
 }
 
-int APS5_VABI sceVideodecMapMemory() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceVideodecQueryResourceInfo(const void* pCfgInfoIn, void* pRsrcInfoOut) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 }
