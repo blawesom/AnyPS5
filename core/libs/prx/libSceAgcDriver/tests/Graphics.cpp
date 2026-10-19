@@ -12,6 +12,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "ShaderDiskCache.hpp"
+#include "ShaderCacheDirectory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
@@ -9721,21 +9722,36 @@ void pipelineStoreLazyBufferPoolTests() {
     Require(mock.live == 0, "lazy buffer pool pipeline tests leaked Vulkan objects");
 }
 
-void pipelineJournalTests() {
+void pipelineJournalTests(bool longPath = false, bool extended = false) {
     using namespace AgcDriver::Graphics;
     using Stage = ShaderRecompiler::ShaderStage;
-    const auto directory = std::filesystem::temp_directory_path() / ("aps5-pipeline-journal-mock-" + std::to_string(std::random_device{}()));
+    const auto root = std::filesystem::temp_directory_path() / ("aps5-pipeline-journal-mock-" + std::to_string(std::random_device{}()));
+    auto directory = root;
+    if (longPath) {
+        Require(root.native().size() < 180, "the temporary root is too long for the journal path fixture");
+        directory /= std::filesystem::path(u8"cache-\u00e4\u6f22");
+        directory /= std::string(229 - directory.native().size(), 'd');
+    }
     std::filesystem::create_directories(directory);
     struct Cleanup {
         std::filesystem::path directory;
+        std::filesystem::path journal;
         ~Cleanup() {
+            ShaderRecompiler::ShaderDiskCache::Shutdown();
             std::error_code error;
+            if (!journal.empty()) {
+                std::filesystem::remove(journal, error);
+                auto lock = journal;
+                lock += ".lock";
+                std::filesystem::remove(lock, error);
+            }
             std::filesystem::remove_all(directory, error);
         }
-    } cleanup{directory};
+    } cleanup{root, {}};
 #ifdef _WIN32
+    if (extended) directory = std::filesystem::path(L"\\\\?\\" + directory.make_preferred().native());
     _putenv_s("ANYPS5_NO_SHADER_CACHE", "0");
-    _putenv_s("ANYPS5_SHADER_CACHE_DIR", directory.string().c_str());
+    _wputenv_s(L"ANYPS5_SHADER_CACHE_DIR", directory.c_str());
     _putenv_s("APS5_PIPELINE_JOURNAL_THREADS", "2");
 #else
     setenv("ANYPS5_NO_SHADER_CACHE", "0", 1);
@@ -9743,6 +9759,14 @@ void pipelineJournalTests() {
     setenv("APS5_PIPELINE_JOURNAL_THREADS", "2", 1);
 #endif
     Require(PipelineJournalEnabled(), "the journal is disabled with a shader cache directory set");
+    auto journalFile = PipelineJournalPath();
+#ifdef _WIN32
+    std::error_code pathError;
+    journalFile = ShaderRecompiler::NativeCachePath_nid_no_patch(journalFile, pathError);
+    Require(!pathError, "cannot normalize the journal fixture path");
+#endif
+    cleanup.journal = journalFile;
+    if (longPath) Require(journalFile.native().size() > 260, "the journal fixture did not cross MAX_PATH");
     const auto module = [](std::uint32_t salt) {
         ShaderRecompiler::RecompileResult result;
         result.spirv = std::vector<std::uint32_t>{0x07230203u, 0x00010000u, 0u, 8u, 0u, 0x00020011u, 1u, 0x00020011u, 2u + salt};
@@ -9934,7 +9958,7 @@ void pipelineJournalTests() {
         FlushPipelineJournal();
         const auto repeated = PipelineJournalTotals();
         Require(repeated.recordedGraphics == recorded.recordedGraphics && repeated.recordedCompute == recorded.recordedCompute && repeated.recordedModules == recorded.recordedModules, "a repeated pipeline was recorded again");
-        Require(std::filesystem::file_size(PipelineJournalPath()) > 0, "the journal file is empty");
+        Require(std::filesystem::file_size(journalFile) > 0, "the journal file is empty");
         const auto storeBefore = PipelineStoreTotals();
         std::vector<std::byte> receivedWords;
         ShaderRecompiler::RecompileResult received;
@@ -9963,7 +9987,7 @@ void pipelineJournalTests() {
         const auto storeHit = PipelineStoreTotals();
         Require(pipeline != nullptr && !built && mock.pipelineCreateCount == created && storeHit.hits == storeReplayed.hits + 1 && storeHit.misses == storeReplayed.misses, "the draw's configuration did not find the replayed pipeline");
         {
-            const auto journalPath = PipelineJournalPath();
+            const auto& journalPath = journalFile;
             const auto whole = std::filesystem::file_size(journalPath);
             Require(whole % 8 == 0 && whole > 3, "the journal file is not record aligned");
             std::filesystem::resize_file(journalPath, whole - 3);
@@ -9977,9 +10001,33 @@ void pipelineJournalTests() {
             torn->Wait();
             const auto reloaded = PipelineJournalTotals();
             Require(reloaded.droppedRecords == 0 && reloaded.loadedModules == 4 && reloaded.loadedRecipes == 2 && reloaded.replayFailed == 0, "the journal did not recover from a tail torn inside a record's padding");
+            const auto writtenBefore = PipelineJournalTotals().writtenBytes;
             RecordComputePipeline(compute, true);
             FlushPipelineJournal();
             Require(PipelineJournalTotals().recordedCompute == reloaded.recordedCompute + 1 && PipelineJournalTotals().recordedModules == reloaded.recordedModules, "the pipeline whose record was torn was not recorded again, or its module was");
+            const auto recordBytes = PipelineJournalTotals().writtenBytes - writtenBefore;
+            std::vector<std::byte> bytes;
+            Require(ShaderRecompiler::ReadWholeFile(journalFile, bytes) && recordBytes > 0 && recordBytes <= bytes.size(), "cannot read the re-recorded journal entry");
+            {
+                std::ofstream file(journalFile, std::ios::binary | std::ios::app);
+                file.write(reinterpret_cast<const char*>(bytes.data() + bytes.size() - recordBytes), static_cast<std::streamsize>(recordBytes));
+                const std::array<char, 8> tornTail{};
+                file.write(tornTail.data(), tornTail.size());
+                file.close();
+                Require(file.good(), "cannot append an external complete record and torn tail");
+            }
+            auto another = module(5);
+            another.bindings.push_back(makeBinding(Role::GuestBuffers, 0, 1, std::vector<std::uint32_t>(4)));
+            const auto beforeAppend = PipelineJournalTotals();
+            RecordComputePipeline(another, false);
+            FlushPipelineJournal();
+            const auto appended = PipelineJournalTotals();
+            Require(appended.writeFailures == 0 && appended.recordedCompute == beforeAppend.recordedCompute + 1, "the append after an external torn tail failed");
+            Require(std::filesystem::file_size(journalFile) == bytes.size() + recordBytes + appended.writtenBytes - beforeAppend.writtenBytes, "tail recovery discarded an external complete record or retained torn bytes");
+            auto recovered = StartPipelineJournalReplay(context, fingerprint, hooks);
+            Require(recovered != nullptr, "the replay after the external append did not start");
+            recovered->Wait();
+            Require(PipelineJournalTotals().loadedModules == 5 && PipelineJournalTotals().loadedRecipes == 4 && PipelineJournalTotals().droppedRecords == 0, "the external append and torn-tail recovery did not replay cleanly");
         }
         {
             const auto before = PipelineJournalTotals();
@@ -9992,7 +10040,7 @@ void pipelineJournalTests() {
         }
         {
             const std::uint32_t meshWithoutOutputSize = 2u;
-            std::fstream file(PipelineJournalPath(), std::ios::in | std::ios::out | std::ios::binary);
+            std::fstream file(journalFile, std::ios::in | std::ios::out | std::ios::binary);
             file.seekp(4);
             file.write(reinterpret_cast<const char*>(&meshWithoutOutputSize), sizeof(meshWithoutOutputSize));
             file.close();
@@ -10035,8 +10083,8 @@ int main(int argc, char** argv) {
             commandBatchFenceFailureTests();
             return 0;
         }
-        if (argc == 2 && std::string_view(argv[1]) == "--pipeline-journal") {
-            pipelineJournalTests();
+        if (argc == 2 && (std::string_view(argv[1]) == "--pipeline-journal" || std::string_view(argv[1]) == "--pipeline-journal-long-paths" || std::string_view(argv[1]) == "--pipeline-journal-extended-paths")) {
+            pipelineJournalTests(std::string_view(argv[1]) != "--pipeline-journal", std::string_view(argv[1]) == "--pipeline-journal-extended-paths");
             std::cout << "pipeline journal recipe, record and replay tests passed\n";
             return 0;
         }
