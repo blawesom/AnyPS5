@@ -234,6 +234,10 @@ void NullPointersFollowFreeBsd() {
     Require(getsockopt_nid_postfix(stream, SolSocket, 0x7fff, nullptr, nullptr) == -1 && *__error_nid_postfix() == ErrorNoProtocolOption, "getsockopt with neither pointer on an unknown option must fail with ENOPROTOOPT (42) first");
     size = 0xffffffffu;
     Require(getsockopt_nid_postfix(stream, SolSocket, SoKeepAlive, &value, &size) == -1 && *__error_nid_postfix() == ErrorInvalid, "getsockopt with a negative length must fail with EINVAL (22)");
+    size = 0xffffffffu;
+    Require(getsockopt_nid_postfix(-1, SolSocket, SoKeepAlive, &value, &size) == -1 && *__error_nid_postfix() == ErrorInvalid, "getsockopt checks a negative length before the descriptor (EINVAL before EBADF)");
+    size = 0xffffffffu;
+    Require(getsockopt_nid_postfix(stream, 0, 1, &value, &size) == -1 && *__error_nid_postfix() == ErrorInvalid, "getsockopt checks a negative length before the level (EINVAL before ENOPROTOOPT)");
     size = sizeof(value);
     Require(getsockopt_nid_postfix(stream, SolSocket, SoKeepAlive, nullptr, &size) == 0 && size == 0, "getsockopt with a null value reports a zero length");
     Require(close_nid_postfix(stream) == 0, "close failed");

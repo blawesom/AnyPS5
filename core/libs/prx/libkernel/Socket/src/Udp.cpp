@@ -969,12 +969,12 @@ int APS5_VABI _fcntl_nid_postfix(int descriptor, int command, ...) {
 }
 int APS5_VABI setsockopt_nid_postfix(int descriptor, int level, int option,
                                     const void* value, std::uint32_t length) {
+    if (!value && length != 0) return Fail(14);
+    if (static_cast<std::int32_t>(length) < 0) return Fail(22);
     int netError = 0;
     if (!GuestSockets::IsOpen(descriptor) && KernelSetSocketOption_nid_no_patch(descriptor, level, option, value, length, &netError)) {
         return netError == 0 ? 0 : Fail(netError);
     }
-    if (!value && length != 0) return Fail(14);
-    if (static_cast<std::int32_t>(length) < 0) return Fail(22);
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (level != 0xffff && level != 6) return Fail(42);
@@ -987,11 +987,11 @@ int APS5_VABI setsockopt_nid_postfix(int descriptor, int level, int option,
 int APS5_VABI getsockopt_nid_postfix(int descriptor, int level, int option,
                                     void* value, std::uint32_t* length) {
     if (value && !length) return Fail(14);
+    std::uint32_t available = value ? *length : 0;
+    if (static_cast<std::int32_t>(available) < 0) return Fail(22);
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (level != 0xffff && level != 6) return Fail(42);
-    std::uint32_t available = value ? *length : 0;
-    if (static_cast<std::int32_t>(available) < 0) return Fail(22);
     std::lock_guard lock(socket->modeMutex);
     const auto native = static_cast<std::uintptr_t>(socket->value);
     const int error = level == 6 ? GuestSockets::GetTcpLevelOption(native, socket->family != GuestUnix && socket->type == 1, option, value, &available)
