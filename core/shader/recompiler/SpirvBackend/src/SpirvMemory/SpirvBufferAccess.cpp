@@ -107,7 +107,13 @@ void EmitPixelFunctionLdsBase(SpirvEmitterState& state) {
     state.module.AddFunction(spv::OpLoad, TypeU32(state), local, slotVar);
     const auto slot = state.module.AllocateId();
     state.module.AddFunction(spv::OpGroupNonUniformBroadcast, TypeU32(state), slot, ConstantU32(state, spv::ScopeSubgroup), local, source);
-    const auto within = EmitAddU32(state, EmitBinaryU32(state, spv::OpIMul, slot, ConstantU32(state, state.hostSubgroupSize)), EmitSubgroupLocalInvocationId(state));
+    std::uint32_t lane;
+    if (state.splitSubgroup) {
+        if (state.subgroupLocalInvocationIdVariable == 0) FailEmit("pixel function LDS lane was not declared");
+        lane = state.module.AllocateId();
+        state.module.AddFunction(spv::OpLoad, TypeU32(state), lane, state.subgroupLocalInvocationIdVariable);
+    } else lane = EmitSubgroupLocalInvocationId(state);
+    const auto within = EmitAddU32(state, EmitBinaryU32(state, spv::OpIMul, slot, ConstantU32(state, state.hostSubgroupSize)), lane);
     state.ldsBufferBase = EmitAddU32(state, EmitBinaryU32(state, spv::OpIMul, within, ConstantU32(state, FunctionLdsDwordLimit)), ConstantU32(state, 3u));
 }
 
