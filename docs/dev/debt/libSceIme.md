@@ -52,6 +52,7 @@
 - [sceImeDicReplaceWord](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) - unknown signature
 - [sceImeDicDeleteLearnDics](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) - unknown signature
 - [sceImeDicDeleteUserDics](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) - unknown signature
+- [sceImeFilterText](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) - the behaviour follows the disassembly of `libSceIme.sprx` from firmware 13.60 (`sceImeFilterText`, 2272 bytes) and is differential-tested against that function run in an x86-64 emulator; it is not measured on a console. The two codepage sets it tests (the helpers at 0x4850 and 0x48f0, which ask two ICU converters compiled into the library whether a UTF-16 unit converts) were derived by running those helpers over all 65536 units and are stored in [ImeFilterCodepages.hpp](../../../core/libs/prx/libSceIme/include/ImeFilterCodepages.hpp); which character encodings they are is not established. The parameter layout beyond `type` is inferred: `mask` is the allowed-class bitmask, and `version` and `variant` are the two `u32` values from which the mask is derived when it is 0 and which select the accepted classes; their meaning is unknown. [sceImeCheckFilterText](../../../core/libs/prx/libSceIme/Export.cpp) throws, as its contract is unknown
 
 ### Functional
 
