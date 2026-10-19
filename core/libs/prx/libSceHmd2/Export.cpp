@@ -711,4 +711,109 @@ std::int32_t APS5_VABI Hmd2CheckSecondThenError1002(const void* a0, const void* 
 }
 APS5_EXPORT("W-ZIlUXcrNA", Hmd2CheckSecondThenError1002);
 
+
+std::int32_t APS5_VABI Hmd2WriteStateTwo(void* a0) {
+    if (a0 == nullptr) return Hmd2::ParameterNull;
+    static constexpr std::uint8_t bytes[] = {0x02, 0x00, 0x00, 0x00, 0x00};
+    std::memcpy(a0, bytes, sizeof bytes);
+    return BeforeInitialize(0, __func__);
+}
+APS5_EXPORT("omimgG5itSs", Hmd2WriteStateTwo);
+
+std::int32_t APS5_VABI Hmd2WriteSize0x2000Align0x100(std::uint64_t* a0, std::uint64_t* a1) {
+    if (a0 == nullptr || a1 == nullptr) return Hmd2::ParameterNull;
+    *a0 = 0x2000;
+    *a1 = 0x100;
+    return BeforeInitialize(0, __func__);
+}
+APS5_EXPORT("6PeHcAaKYg8", Hmd2WriteSize0x2000Align0x100);
+
+std::int32_t APS5_VABI Hmd2WriteFourConstants(void* a0) {
+    if (a0 == nullptr) return Hmd2::ParameterNull;
+    static constexpr std::uint8_t bytes[] = {0xe1, 0xf0, 0x74, 0x3c, 0xd8, 0xf0, 0x74, 0x3c, 0x1f, 0xf1, 0x74, 0x3c, 0xd8, 0xf0, 0x74, 0x3c};
+    std::memcpy(a0, bytes, sizeof bytes);
+    return BeforeInitialize(0, __func__);
+}
+APS5_EXPORT("yur+xPdWPAg", Hmd2WriteFourConstants);
+
+std::int32_t APS5_VABI Hmd2WriteSixHalvesThenInvalidHandle(std::uint64_t a0, void* a1) {
+    (void)a0;
+    if (a1 == nullptr) return Hmd2::ParameterNull;
+    static constexpr std::uint8_t bytes[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x3f};
+    std::memcpy(a1, bytes, sizeof bytes);
+    return BeforeInitialize(Hmd2::InvalidHandle, __func__);
+}
+APS5_EXPORT("RnieDDp5ge4", Hmd2WriteSixHalvesThenInvalidHandle);
+APS5_EXPORT("jM3NEJA11yw", Hmd2WriteSixHalvesThenInvalidHandle);
+
+std::int32_t APS5_VABI Hmd2WriteTwelveHalvesThenInvalidHandle(std::uint64_t a0, void* a1) {
+    (void)a0;
+    if (a1 == nullptr) return Hmd2::ParameterNull;
+    static constexpr std::uint8_t bytes[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    std::memcpy(a1, bytes, sizeof bytes);
+    return BeforeInitialize(Hmd2::InvalidHandle, __func__);
+}
+APS5_EXPORT("b0H-n-tUk0U", Hmd2WriteTwelveHalvesThenInvalidHandle);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo3CheckSecondThirdThenZero(std::uint64_t a0, const void* a1, const void* a2) {
+    if (a1 == nullptr || a2 == nullptr) return Hmd2::ParameterNull;
+    if (a0 > 3) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(0, __func__);
+}
+APS5_EXPORT("MXhloJ6Iw3w", Hmd2SlotUpTo3CheckSecondThirdThenZero);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo1ThenError1002(std::uint64_t a0) {
+    if (a0 > 1) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(Hmd2::Error1002, __func__);
+}
+APS5_EXPORT("19wrIIiqFgM", Hmd2SlotUpTo1ThenError1002);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo1CheckSecondThenError1002(std::uint64_t a0, const void* a1) {
+    if (a1 == nullptr) return Hmd2::ParameterNull;
+    if (a0 > 1) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(Hmd2::Error1002, __func__);
+}
+APS5_EXPORT("Z389vAm47Ys", Hmd2SlotUpTo1CheckSecondThenError1002);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo1ThenMinusOne(std::uint64_t a0) {
+    if (a0 > 1) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(-1, __func__);
+}
+APS5_EXPORT("cDcrvEG8j8k", Hmd2SlotUpTo1ThenMinusOne);
+APS5_EXPORT("tuqJO6O6cb4", Hmd2SlotUpTo1ThenMinusOne);
+APS5_EXPORT("fd4fu1cziaI", Hmd2SlotUpTo1ThenMinusOne);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenMinusOne(std::uint64_t a0) {
+    if (a0 > 2) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(-1, __func__);
+}
+APS5_EXPORT("UxMg7iL4nRs", Hmd2SlotUpTo2ThenMinusOne);
+APS5_EXPORT("K1GELwlaaGc", Hmd2SlotUpTo2ThenMinusOne);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenError1002(std::uint64_t a0) {
+    if (a0 > 2) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(Hmd2::Error1002, __func__);
+}
+APS5_EXPORT("RFn39VCHjGY", Hmd2SlotUpTo2ThenError1002);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenError1003(std::uint64_t a0) {
+    if (a0 > 2) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(Hmd2::Error1003, __func__);
+}
+APS5_EXPORT("FRoSjceDv10", Hmd2SlotUpTo2ThenError1003);
+
+std::int32_t APS5_VABI Hmd2SlotUpTo2CheckSecondThenError002C(std::uint64_t a0, const void* a1) {
+    if (a1 == nullptr) return Hmd2::ParameterNull;
+    if (a0 > 2) return Hmd2::ParameterInvalid;
+    return BeforeInitialize(Hmd2::Error002C, __func__);
+}
+APS5_EXPORT("wQ44gBwBw44", Hmd2SlotUpTo2CheckSecondThenError002C);
+
+std::int32_t APS5_VABI Hmd2IndexZeroCheckSecondThenZero(std::uint64_t a0, const void* a1) {
+    if (a1 == nullptr) return Hmd2::ParameterNull;
+    if (a0 != 0) return Hmd2::Error100F;
+    return BeforeInitialize(0, __func__);
+}
+APS5_EXPORT("wiv8+7ogrq0", Hmd2IndexZeroCheckSecondThenZero);
+
 }

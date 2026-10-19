@@ -11,6 +11,20 @@
 #include <stdexcept>
 
 extern "C" {
+std::int32_t APS5_VABI Hmd2WriteStateTwo(void* a0);
+std::int32_t APS5_VABI Hmd2WriteSize0x2000Align0x100(std::uint64_t* a0, std::uint64_t* a1);
+std::int32_t APS5_VABI Hmd2WriteFourConstants(void* a0);
+std::int32_t APS5_VABI Hmd2WriteSixHalvesThenInvalidHandle(std::uint64_t a0, void* a1);
+std::int32_t APS5_VABI Hmd2WriteTwelveHalvesThenInvalidHandle(std::uint64_t a0, void* a1);
+std::int32_t APS5_VABI Hmd2SlotUpTo3CheckSecondThirdThenZero(std::uint64_t a0, const void* a1, const void* a2);
+std::int32_t APS5_VABI Hmd2SlotUpTo1ThenError1002(std::uint64_t a0);
+std::int32_t APS5_VABI Hmd2SlotUpTo1CheckSecondThenError1002(std::uint64_t a0, const void* a1);
+std::int32_t APS5_VABI Hmd2SlotUpTo1ThenMinusOne(std::uint64_t a0);
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenMinusOne(std::uint64_t a0);
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenError1002(std::uint64_t a0);
+std::int32_t APS5_VABI Hmd2SlotUpTo2ThenError1003(std::uint64_t a0);
+std::int32_t APS5_VABI Hmd2SlotUpTo2CheckSecondThenError002C(std::uint64_t a0, const void* a1);
+std::int32_t APS5_VABI Hmd2IndexZeroCheckSecondThenZero(std::uint64_t a0, const void* a1);
 std::int32_t APS5_VABI Hmd2CheckFirstThenError0004(const void*);
 std::int32_t APS5_VABI Hmd2CheckFirstThenZero(const void*);
 std::int32_t APS5_VABI Hmd2CheckFirstThenError1002(const void*);
@@ -76,6 +90,35 @@ void TestBeforeInitialize() {
     Require(sceHmd2Open(USER_SERVICE_INITIAL_USER_ID, 0, 0, nullptr) == Hmd2::NotInitialized, "open before initialization");
     Require(sceHmd2Close(0) == Hmd2::NotInitialized, "close before initialization");
     Require(sceHmd2Terminate() == Hmd2::NotInitialized, "terminate before initialization");
+    {
+        std::uint8_t out[64];
+        std::uint64_t words[2];
+        Require(Hmd2WriteStateTwo(nullptr) == Hmd2::ParameterNull, "Hmd2WriteStateTwo null before initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteStateTwo(out) == 0 && out[0] == 2 && out[1] == 0 && out[4] == 0 && out[5] == 0xaa, "Hmd2WriteStateTwo bytes before initialization");
+        Require(Hmd2WriteSize0x2000Align0x100(nullptr, words) == Hmd2::ParameterNull && Hmd2WriteSize0x2000Align0x100(words, nullptr) == Hmd2::ParameterNull, "Hmd2WriteSize0x2000Align0x100 null before initialization");
+        words[0] = words[1] = ~0ull;
+        Require(Hmd2WriteSize0x2000Align0x100(words, words + 1) == 0 && words[0] == 0x2000 && words[1] == 0x100, "Hmd2WriteSize0x2000Align0x100 values before initialization");
+        Require(Hmd2WriteFourConstants(nullptr) == Hmd2::ParameterNull, "Hmd2WriteFourConstants null before initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteFourConstants(out) == 0 && out[0] == 0xe1 && out[15] == 0x3c && out[16] == 0xaa, "Hmd2WriteFourConstants bytes before initialization");
+        Require(Hmd2WriteSixHalvesThenInvalidHandle(0, nullptr) == Hmd2::ParameterNull, "Hmd2WriteSixHalvesThenInvalidHandle null before initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteSixHalvesThenInvalidHandle(0, out) == Hmd2::InvalidHandle && out[7] == 0x3f && out[20] == 0x00 && out[23] == 0x3f && out[24] == 0xaa, "Hmd2WriteSixHalvesThenInvalidHandle bytes before initialization");
+        Require(Hmd2WriteTwelveHalvesThenInvalidHandle(0, nullptr) == Hmd2::ParameterNull, "Hmd2WriteTwelveHalvesThenInvalidHandle null before initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteTwelveHalvesThenInvalidHandle(0, out) == Hmd2::InvalidHandle && out[7] == 0x3f && out[31] == 0x3f && out[47] == 0x00 && out[48] == 0xaa, "Hmd2WriteTwelveHalvesThenInvalidHandle bytes before initialization");
+        Require(Hmd2SlotUpTo3CheckSecondThirdThenZero(9, nullptr, out) == Hmd2::ParameterNull && Hmd2SlotUpTo3CheckSecondThirdThenZero(0, out, nullptr) == Hmd2::ParameterNull, "Hmd2SlotUpTo3CheckSecondThirdThenZero null before initialization");
+        Require(Hmd2SlotUpTo3CheckSecondThirdThenZero(3, out, out) == 0 && Hmd2SlotUpTo3CheckSecondThirdThenZero(4, out, out) == Hmd2::ParameterInvalid && Hmd2SlotUpTo3CheckSecondThirdThenZero(~0ull, out, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo3CheckSecondThirdThenZero slots before initialization");
+        Require(Hmd2SlotUpTo1ThenError1002(1) == Hmd2::Error1002 && Hmd2SlotUpTo1ThenError1002(2) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1ThenError1002 before initialization");
+        Require(Hmd2SlotUpTo1CheckSecondThenError1002(5, nullptr) == Hmd2::ParameterNull && Hmd2SlotUpTo1CheckSecondThenError1002(0, out) == Hmd2::Error1002 && Hmd2SlotUpTo1CheckSecondThenError1002(2, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1CheckSecondThenError1002 before initialization");
+        Require(Hmd2SlotUpTo1ThenMinusOne(1) == -1 && Hmd2SlotUpTo1ThenMinusOne(2) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1ThenMinusOne before initialization");
+        Require(Hmd2SlotUpTo2ThenMinusOne(2) == -1 && Hmd2SlotUpTo2ThenMinusOne(3) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenMinusOne before initialization");
+        Require(Hmd2SlotUpTo2ThenError1002(2) == Hmd2::Error1002 && Hmd2SlotUpTo2ThenError1002(3) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenError1002 before initialization");
+        Require(Hmd2SlotUpTo2ThenError1003(0) == Hmd2::Error1003 && Hmd2SlotUpTo2ThenError1003(16) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenError1003 before initialization");
+        Require(Hmd2SlotUpTo2CheckSecondThenError002C(8, nullptr) == Hmd2::ParameterNull && Hmd2SlotUpTo2CheckSecondThenError002C(2, out) == Hmd2::Error002C && Hmd2SlotUpTo2CheckSecondThenError002C(3, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2CheckSecondThenError002C before initialization");
+        Require(Hmd2IndexZeroCheckSecondThenZero(1, nullptr) == Hmd2::ParameterNull && Hmd2IndexZeroCheckSecondThenZero(0, out) == 0 && Hmd2IndexZeroCheckSecondThenZero(1, out) == Hmd2::Error100F, "Hmd2IndexZeroCheckSecondThenZero before initialization");
+    }
     const std::uint8_t dummyBytes[16]{};
     const void* dummy = dummyBytes;
     Require(Hmd2CheckFirstThenError0004(dummy) == Hmd2::Error0004, "Hmd2CheckFirstThenError0004 with every pointer present before initialization");
@@ -147,6 +190,35 @@ void TestWithoutHeadset() {
     Hmd2::DeviceInformation info;
     Require(sceHmd2GetDeviceInformation(&info) == Hmd2::NotInitialized, "device information without a headset");
     Require(sceHmd2Terminate() == Hmd2::NotInitialized, "terminate after the failed initialization");
+    {
+        std::uint8_t out[64];
+        std::uint64_t words[2];
+        Require(Hmd2WriteStateTwo(nullptr) == Hmd2::ParameterNull, "Hmd2WriteStateTwo null after the failed initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteStateTwo(out) == 0 && out[0] == 2 && out[1] == 0 && out[4] == 0 && out[5] == 0xaa, "Hmd2WriteStateTwo bytes after the failed initialization");
+        Require(Hmd2WriteSize0x2000Align0x100(nullptr, words) == Hmd2::ParameterNull && Hmd2WriteSize0x2000Align0x100(words, nullptr) == Hmd2::ParameterNull, "Hmd2WriteSize0x2000Align0x100 null after the failed initialization");
+        words[0] = words[1] = ~0ull;
+        Require(Hmd2WriteSize0x2000Align0x100(words, words + 1) == 0 && words[0] == 0x2000 && words[1] == 0x100, "Hmd2WriteSize0x2000Align0x100 values after the failed initialization");
+        Require(Hmd2WriteFourConstants(nullptr) == Hmd2::ParameterNull, "Hmd2WriteFourConstants null after the failed initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteFourConstants(out) == 0 && out[0] == 0xe1 && out[15] == 0x3c && out[16] == 0xaa, "Hmd2WriteFourConstants bytes after the failed initialization");
+        Require(Hmd2WriteSixHalvesThenInvalidHandle(0, nullptr) == Hmd2::ParameterNull, "Hmd2WriteSixHalvesThenInvalidHandle null after the failed initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteSixHalvesThenInvalidHandle(0, out) == Hmd2::InvalidHandle && out[7] == 0x3f && out[20] == 0x00 && out[23] == 0x3f && out[24] == 0xaa, "Hmd2WriteSixHalvesThenInvalidHandle bytes after the failed initialization");
+        Require(Hmd2WriteTwelveHalvesThenInvalidHandle(0, nullptr) == Hmd2::ParameterNull, "Hmd2WriteTwelveHalvesThenInvalidHandle null after the failed initialization");
+        std::memset(out, 0xaa, sizeof out);
+        Require(Hmd2WriteTwelveHalvesThenInvalidHandle(0, out) == Hmd2::InvalidHandle && out[7] == 0x3f && out[31] == 0x3f && out[47] == 0x00 && out[48] == 0xaa, "Hmd2WriteTwelveHalvesThenInvalidHandle bytes after the failed initialization");
+        Require(Hmd2SlotUpTo3CheckSecondThirdThenZero(9, nullptr, out) == Hmd2::ParameterNull && Hmd2SlotUpTo3CheckSecondThirdThenZero(0, out, nullptr) == Hmd2::ParameterNull, "Hmd2SlotUpTo3CheckSecondThirdThenZero null after the failed initialization");
+        Require(Hmd2SlotUpTo3CheckSecondThirdThenZero(3, out, out) == 0 && Hmd2SlotUpTo3CheckSecondThirdThenZero(4, out, out) == Hmd2::ParameterInvalid && Hmd2SlotUpTo3CheckSecondThirdThenZero(~0ull, out, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo3CheckSecondThirdThenZero slots after the failed initialization");
+        Require(Hmd2SlotUpTo1ThenError1002(1) == Hmd2::Error1002 && Hmd2SlotUpTo1ThenError1002(2) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1ThenError1002 after the failed initialization");
+        Require(Hmd2SlotUpTo1CheckSecondThenError1002(5, nullptr) == Hmd2::ParameterNull && Hmd2SlotUpTo1CheckSecondThenError1002(0, out) == Hmd2::Error1002 && Hmd2SlotUpTo1CheckSecondThenError1002(2, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1CheckSecondThenError1002 after the failed initialization");
+        Require(Hmd2SlotUpTo1ThenMinusOne(1) == -1 && Hmd2SlotUpTo1ThenMinusOne(2) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo1ThenMinusOne after the failed initialization");
+        Require(Hmd2SlotUpTo2ThenMinusOne(2) == -1 && Hmd2SlotUpTo2ThenMinusOne(3) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenMinusOne after the failed initialization");
+        Require(Hmd2SlotUpTo2ThenError1002(2) == Hmd2::Error1002 && Hmd2SlotUpTo2ThenError1002(3) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenError1002 after the failed initialization");
+        Require(Hmd2SlotUpTo2ThenError1003(0) == Hmd2::Error1003 && Hmd2SlotUpTo2ThenError1003(16) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2ThenError1003 after the failed initialization");
+        Require(Hmd2SlotUpTo2CheckSecondThenError002C(8, nullptr) == Hmd2::ParameterNull && Hmd2SlotUpTo2CheckSecondThenError002C(2, out) == Hmd2::Error002C && Hmd2SlotUpTo2CheckSecondThenError002C(3, out) == Hmd2::ParameterInvalid, "Hmd2SlotUpTo2CheckSecondThenError002C after the failed initialization");
+        Require(Hmd2IndexZeroCheckSecondThenZero(1, nullptr) == Hmd2::ParameterNull && Hmd2IndexZeroCheckSecondThenZero(0, out) == 0 && Hmd2IndexZeroCheckSecondThenZero(1, out) == Hmd2::Error100F, "Hmd2IndexZeroCheckSecondThenZero after the failed initialization");
+    }
     const std::uint8_t dummyBytes[16]{};
     const void* dummy = dummyBytes;
     Require(Hmd2CheckFirstThenError0004(dummy) == Hmd2::Error0004, "Hmd2CheckFirstThenError0004 with every pointer present after the failed initialization");
