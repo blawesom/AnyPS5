@@ -284,7 +284,7 @@ int main() {
             InsertMeshBarycentricFlag(bytes);
             bytes.insert(bytes.begin() + 259u, {0u, 0u});
             InsertPixelDefaultsAfterFrontFace(bytes);
-            bytes.insert(bytes.end(), sizeof(std::uint64_t) + 1u + 5u + 1u, 0u);
+            bytes.insert(bytes.end(), sizeof(std::uint64_t) + 1u + 5u + 1u + 1u, 0u);
             Require(serializer.Serialize(replay.request) == EncodeBase64(bytes));
 
             auto truncated23 = DecodeBase64(encoded23);
@@ -447,9 +447,10 @@ int main() {
     for (const bool preserve : {false, true}) {
         request.target.float16DenormPreserve = preserve;
         request.target.float32FlushToZero = !preserve;
+        request.target.largePixelFunctionLdsBuffer = !preserve;
         const auto encoded = serializer.Serialize(request);
         const auto replay = serializer.Deserialize(encoded);
-        Require(replay.request.target.float16DenormPreserve == preserve && replay.request.target.float32FlushToZero == !preserve);
+        Require(replay.request.target.float16DenormPreserve == preserve && replay.request.target.float32FlushToZero == !preserve && replay.request.target.largePixelFunctionLdsBuffer == !preserve);
         auto bytes = DecodeBase64(encoded);
         Require(bytes.size() >= 8u && bytes[4] == 39u && bytes[5] == 0u && bytes[6] == 0u && bytes[7] == 0u);
         auto future = bytes;
@@ -500,6 +501,7 @@ int main() {
         Require(stencilOperationValue < version35.end() && *stencilOperationValue == 0u);
         version35.erase(stencilOperationValue);
         version35[4] = 35u;
+        version35.pop_back();
         version35.pop_back();
         const auto replay35 = serializer.Deserialize(EncodeBase64(version35));
         Require(replay35.request.target.spannedWaves == spanned && !replay35.request.target.float32FlushToZero);

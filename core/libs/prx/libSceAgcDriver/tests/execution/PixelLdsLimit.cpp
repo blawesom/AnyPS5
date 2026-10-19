@@ -6,7 +6,9 @@
 #include <array>
 #include <cstdio>
 #include <iostream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -21,13 +23,16 @@ constexpr std::uint32_t Last = 0x22220000u;
 constexpr std::uint32_t Past = 0x33330000u;
 alignas(256) std::array<std::byte, Width * Height * 4> Pixels{};
 alignas(256) std::array<std::uint32_t, Width * Height * 4> Results{};
+constexpr std::uint32_t Overflow = 256u;
+alignas(256) std::array<std::byte, Overflow * Overflow * 4> OverflowPixels{};
+alignas(256) std::array<std::uint32_t, Overflow * Overflow * 4> OverflowResults{};
 
 alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
     0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
 };
 
-std::vector<std::uint32_t> PixelCode() {
-    std::vector<std::uint32_t> code{0x7e040f00, 0x7e060f01, 0xd5430006, 0x0409ff03, Width};
+std::vector<std::uint32_t> PixelCode(std::uint32_t width) {
+    std::vector<std::uint32_t> code{0x7e040f00, 0x7e060f01, 0xd5430006, 0x0409ff03, width};
     const auto mov = [&](std::uint32_t reg, std::uint32_t literal) {
         code.push_back(0x7e0002ffu | (reg << 17u));
         code.push_back(literal);
@@ -76,10 +81,10 @@ constexpr std::array<std::array<float, 4>, 3> Triangles{{
     {-1.0f, -1.0f, 0.5f, 1.0f}, {3.0f, -1.0f, 0.5f, 1.0f}, {-1.0f, 3.0f, 0.5f, 1.0f}
 }};
 
-void Draw(AgcDriver::VulkanDevice& device) {
-    const auto pixelCode = PixelCode();
-    Pixels.fill(std::byte{0});
-    Results.fill(0u);
+void Draw(AgcDriver::VulkanDevice& device, std::uint32_t width, std::uint32_t height, std::span<std::byte> pixels, std::span<std::uint32_t> results) {
+    const auto pixelCode = PixelCode(width);
+    std::fill(pixels.begin(), pixels.end(), std::byte{0});
+    std::fill(results.begin(), results.end(), 0u);
     const auto target = device.Target();
     std::vector<std::uint32_t> vertexUserData(4, 0u);
     const auto vertexBuffer = BufferDescriptor(Triangles.data(), 16u, static_cast<std::uint32_t>(Triangles.size()));
@@ -102,8 +107,8 @@ void Draw(AgcDriver::VulkanDevice& device) {
     pixel.targetOutputMode[0] = 9;
     pixel.targetExportMapping.fill(0xe4u);
     std::vector<std::uint32_t> pixelUserData(8, 0u);
-    const auto results = BufferDescriptor(Results.data(), 16u, Width * Height);
-    std::copy(results.begin(), results.end(), pixelUserData.begin() + 4);
+    const auto stored = BufferDescriptor(results.data(), 16u, width * height);
+    std::copy(stored.begin(), stored.end(), pixelUserData.begin() + 4);
     const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(pixelCode.data()), std::as_bytes(std::span(pixelCode))}}};
     ShaderRecompiler::RecompileRequest fragment{
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
@@ -113,21 +118,21 @@ void Draw(AgcDriver::VulkanDevice& device) {
     };
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
-    Require(pixelResult.functionLdsBuffer, "pixel LDS limit: the full array was not backed by a buffer");
+    Require(pixelResult.functionLdsBuffer == target.largePixelFunctionLdsBuffer, target.largePixelFunctionLdsBuffer ? "pixel LDS limit: the full array was not backed by a buffer" : "pixel LDS limit: a driver that keeps the function array used the buffer");
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Vertex, &vertexResult, 0},
         {ShaderStage::Fragment, &pixelResult, PixelPushOffset(vertexPush, target)}
     }};
     AgcDriver::Graphics::State state{};
     state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, 64u, 64u, std::nullopt, std::nullopt};
-    state.color = {reinterpret_cast<std::uintptr_t>(Pixels.data()), {Width, Height}, VK_FORMAT_R8G8B8A8_UNORM, Pixels.size(), 0xe4u};
+    state.color = {reinterpret_cast<std::uintptr_t>(pixels.data()), {width, height}, VK_FORMAT_R8G8B8A8_UNORM, pixels.size(), 0xe4u};
     state.colors = {state.color};
     state.hasColorTarget = true;
-    state.renderExtent = {Width, Height};
+    state.renderExtent = {width, height};
     state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    state.viewport = {0, static_cast<float>(Height), static_cast<float>(Width), -static_cast<float>(Height), 0, 1};
+    state.viewport = {0, static_cast<float>(height), static_cast<float>(width), -static_cast<float>(height), 0, 1};
     state.negativeOneToOne = false;
-    state.scissor = {{0, 0}, {Width, Height}};
+    state.scissor = {{0, 0}, {width, height}};
     state.cullMode = VK_CULL_MODE_NONE;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     state.blend.colorWriteMask = 15;
@@ -148,7 +153,7 @@ int main() {
             std::printf("skipped, subgroup size %u cannot hold a wave32\n", device->Target().subgroupSize);
             return VulkanTestSkipped;
         }
-        Draw(*device);
+        Draw(*device, Width, Height, Pixels, Results);
         for (std::uint32_t pixel = 0; pixel < Width * Height; ++pixel) {
             for (std::uint32_t channel = 0; channel < 4u; ++channel) Require(Pixels[pixel * 4u + channel] == std::byte{255}, "pixel LDS limit: missing color");
             const auto base = pixel * 4u;
@@ -157,6 +162,17 @@ int main() {
             Require(Results[base + 2u] == 0u, "pixel LDS limit: dword 8192 wrote " + std::to_string(Results[base + 2u]));
         }
         std::puts("pixel LDS limit passed: dword 8000 and 8191, 2048 pixels");
+        if (device->Target().largePixelFunctionLdsBuffer) {
+            bool threw = false;
+            try {
+                Draw(*device, Overflow, Overflow, OverflowPixels, OverflowResults);
+            } catch (const std::exception& error) {
+                threw = std::string_view(error.what()) == "AGC graphics: pixel function LDS subgroup slots exhausted";
+                if (!threw) throw;
+            }
+            Require(threw, "pixel LDS limit: a draw past the subgroup slots did not throw");
+            std::puts("pixel LDS limit overflow passed");
+        }
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

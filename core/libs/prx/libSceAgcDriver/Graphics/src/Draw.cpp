@@ -158,9 +158,11 @@ void PreparePixelFunctionLds(const Context& context, VkCommandBuffer commands, s
         pool.announced = true;
     }
     Require(pool.subgroupSize == subgroupSize, "pixel function LDS subgroup size does not match the pool");
-    context.Resolved(&DeviceFunctions::cmdFillBuffer, "vkCmdFillBuffer")(commands, pool.buffer, 0, 8, 0u);
-    const VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
-    context.Resolved(&DeviceFunctions::cmdPipelineBarrier, "vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+    const VkMemoryBarrier beforeFill{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT};
+    context.Resolved(&DeviceFunctions::cmdPipelineBarrier, "vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &beforeFill, 0, nullptr, 0, nullptr);
+    context.Resolved(&DeviceFunctions::cmdFillBuffer, "vkCmdFillBuffer")(commands, pool.buffer, 0, 4, 0u);
+    const VkMemoryBarrier afterFill{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
+    context.Resolved(&DeviceFunctions::cmdPipelineBarrier, "vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &afterFill, 0, nullptr, 0, nullptr);
 }
 
 std::uint32_t PixelFunctionLdsSubgroup(std::span<const CompiledShader> shaders) {
@@ -182,7 +184,9 @@ void CheckPixelFunctionLds(const Context& context) {
     std::lock_guard lock(PixelLdsMutex());
     const auto found = PixelLdsPools().find(context.device);
     if (found == PixelLdsPools().end() || found->second.header == nullptr) return;
-    if (found->second.header[1] != 0u) throw std::runtime_error("AGC graphics: pixel function LDS subgroup slots exhausted");
+    const auto exhausted = found->second.header[1] != 0u;
+    found->second.header[1] = 0u;
+    if (exhausted) throw std::runtime_error("AGC graphics: pixel function LDS subgroup slots exhausted");
 }
 
 void ReleasePixelFunctionLds(VkDevice device) {

@@ -858,6 +858,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
         writer.WriteU32(request.context.vertex->depthRemapMode);
     }
     writer.WriteBool(request.target.float32FlushToZero);
+    writer.WriteBool(request.target.largePixelFunctionLdsBuffer);
     return base64Encode(buffer);
 }
 
@@ -911,6 +912,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         }
     }
     if (version >= 36u) result.request.target.float32FlushToZero = reader.ReadBool();
+    if (version >= 39u) result.request.target.largePixelFunctionLdsBuffer = reader.ReadBool();
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }

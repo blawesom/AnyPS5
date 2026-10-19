@@ -278,7 +278,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.robustBufferAccess2 = target.robustBufferAccess2;
     state.float32FlushToZero = target.float32FlushToZero;
     state.hostSubgroupSize = target.subgroupSize;
-    if (program.Resources().stage == IrShaderStage::Pixel && state.requirements.functionLds && state.requirements.functionLdsDwords > PixelFunctionStorageDwords) {
+    if (target.largePixelFunctionLdsBuffer && program.Resources().stage == IrShaderStage::Pixel && state.requirements.functionLds && state.requirements.functionLdsDwords > PixelFunctionStorageDwords) {
         state.pixelFunctionLdsBuffer = true;
         state.requirements.subgroupLocalInvocationId = true;
         state.requirements.subgroupBallot = true;
