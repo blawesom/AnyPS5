@@ -26,7 +26,7 @@ def git(*args):
 
 def daily_commits(ref):
     seen = {}
-    for line in git("log", "--first-parent", "--format=%H %cs", ref).decode().splitlines():
+    for line in git("log", "--first-parent", "--format=%H %cs", ref).decode("utf-8").splitlines():
         sha, day = line.split()
         seen.setdefault(day, sha)
     return sorted(seen.items())
@@ -221,12 +221,12 @@ def page(points):
     ]) + "\n"
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
     parser.add_argument("--ref", default="HEAD", help="branch or commit whose first-parent history is measured")
     parser.add_argument("--cache", type=Path, help="reuse per-commit counts while the scanner, ISA list and Python version match")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         if args.cache:
             outputs = [args.output / name for name in ("history.json", "history.svg", "history.html")]
@@ -239,7 +239,11 @@ if __name__ == "__main__":
     if not points:
         parser.error("no commit with a measurable tree")
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "history.json").write_text(json.dumps(points, indent=2))
-    (args.output / "history.svg").write_text(chart(points) + "\n")
-    (args.output / "history.html").write_text(page(points))
+    (args.output / "history.json").write_text(json.dumps(points, indent=2), encoding="utf-8")
+    (args.output / "history.svg").write_text(chart(points) + "\n", encoding="utf-8")
+    (args.output / "history.html").write_text(page(points), encoding="utf-8")
     print(f"{len(points)} days, {points[0]['date']} .. {points[-1]['date']}")
+
+
+if __name__ == "__main__":
+    main()
