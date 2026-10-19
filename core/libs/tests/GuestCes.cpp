@@ -18,6 +18,7 @@ int APS5_VABI sceCesUcs2StrGetMbcsLen(void*, const std::uint16_t*, std::uint32_t
 int APS5_VABI sceCesMbcsStrToUcs2Str(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesMbcsStrGetUcs2Len(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint32_t*);
 int APS5_VABI sceCesEucJpToUcs2(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint16_t*);
+int APS5_VABI sceCesEucJpToUtf8(void*, std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesSbcToUtf8(const std::uint8_t*, std::uint8_t, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesUtf8ToSbc(const std::uint8_t*, std::uint32_t, std::uint32_t*, const std::uint8_t*, std::uint8_t*);
 void* APS5_VABI sceCesUcsProfileInitSJis1997Cp932(void*);
@@ -189,6 +190,30 @@ int main() {
     std::uint16_t single = 0;
     Require(sceCesEucJpToUcs2(eucJp, reinterpret_cast<const std::uint8_t*>("\x8E\xB1"), 2, &used, &single) == 0 && used == 2 && single == 0xFF71);
     Require(sceCesEucJpToUcs2(cyrillic, reinterpret_cast<const std::uint8_t*>("A"), 1, &used, &single) == invalidParameter);
+    std::uint8_t asciiCharacter[] = {'A'};
+    char invalidEucJpProfile[8] = {};
+    std::uint8_t halfWidthKatakana[] = {0x8E, 0xB1};
+    std::uint8_t jis0208Character[] = {0xA4, 0xB3};
+    std::uint8_t jis0212Character[] = {0x8F, 0xA2, 0xAF};
+    std::uint8_t truncatedCharacter[] = {0xA4};
+    std::uint8_t utf8Character[4] = {};
+    std::uint32_t utf8Length = 0;
+    Require(sceCesEucJpToUtf8(eucJp, asciiCharacter, 1, &used, utf8Character, sizeof(utf8Character), &utf8Length) == 0);
+    Require(used == 1 && utf8Length == 1 && utf8Character[0] == 'A');
+    Require(sceCesEucJpToUtf8(eucJp, halfWidthKatakana, 2, &used, utf8Character, sizeof(utf8Character), &utf8Length) == 0);
+    Require(used == 2 && utf8Length == 3 && std::memcmp(utf8Character, "\xEF\xBD\xB1", 3) == 0);
+    Require(sceCesEucJpToUtf8(eucJp, jis0208Character, 2, &used, utf8Character, sizeof(utf8Character), &utf8Length) == 0);
+    Require(used == 2 && utf8Length == 3 && std::memcmp(utf8Character, "\xE3\x81\x93", 3) == 0);
+    Require(sceCesEucJpToUtf8(eucJp, jis0212Character, 3, &used, utf8Character, sizeof(utf8Character), &utf8Length) == 0);
+    Require(used == 3 && utf8Length == 2 && std::memcmp(utf8Character, "\xCB\x98", 2) == 0);
+    used = 17;
+    utf8Length = 19;
+    Require(sceCesEucJpToUtf8(invalidEucJpProfile, asciiCharacter, 1, &used, utf8Character, sizeof(utf8Character), &utf8Length) == invalidParameter);
+    Require(used == 17 && utf8Length == 19);
+    Require(sceCesEucJpToUtf8(eucJp, truncatedCharacter, 1, &used, utf8Character, sizeof(utf8Character), &utf8Length) == srcBufferEnd);
+    Require(used == 17 && utf8Length == 19);
+    Require(sceCesEucJpToUtf8(eucJp, jis0208Character, 2, &used, utf8Character, 2, &utf8Length) == dstBufferEnd);
+    Require(used == 17 && utf8Length == 19);
 
     const auto* japanese = reinterpret_cast<const std::uint8_t*>("\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E");
     Require(sceCesUtf8StrToMbcsStr(eucContext, japanese, 24, &used, mbcs, sizeof(mbcs), &produced) == 0);
