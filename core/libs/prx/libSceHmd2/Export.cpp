@@ -1,4 +1,5 @@
 #include "Hmd2.hpp"
+#include "prx/libc/include/general/ExportMacros.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceHmd/Hmd.hpp"
@@ -17,6 +18,12 @@ constexpr Hmd2::FieldOfView DefaultFieldOfView{1.84177089f, 0.947190642f, 1.3289
 std::mutex stateMutex;
 bool initialized = false;
 std::int32_t openHandle = 0;
+
+std::int32_t BeforeInitialize(std::int32_t answer, const char* name) {
+    std::lock_guard lock(stateMutex);
+    if (initialized) NotImplemented_nid_no_patch(name);
+    return answer;
+}
 
 std::uint32_t CompiledSdkVersion() {
     static const auto* processParameters = static_cast<const std::byte*>(ApplicationProcessParameters_nid_no_patch());
@@ -217,42 +224,7 @@ std::int32_t APS5_VABI sceHmd2SetVibration(std::int32_t handle, std::uint32_t le
     return 0;
 }
 
-int APS5_VABI sceHmd2GazeGetCalibrationData() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceHmd2GazeGetCalibrationDataMaxSize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionClearUserEventEnd() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionClearUserEventStart() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionGetCurrentOutput() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionSetUserEventEnd() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionSetUserEventStart() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeActivateGazeTracking() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -268,31 +240,6 @@ int APS5_VABI sceHmd2GazeGetUserCalibrationStatus() {
 }
 
 int APS5_VABI sceHmd2GazeInsertRawDataWithHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeSetEnabledEye() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeSetUserCalibrationData() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeSetUserCalibrationPoint() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeStartUserCalibration() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeStopUserCalibration() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -327,17 +274,7 @@ int APS5_VABI sceHmd2GazeObjectSelectionGetSelectedObject() {
     return 0;
 }
 
-int APS5_VABI sceHmd2GazeObjectSelectionInitialize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceHmd2GazeObjectSelectionQueryMemory() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2GazeObjectSelectionTerminate() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -372,10 +309,179 @@ int APS5_VABI sceHmd2SetFieldOfView() {
     return 0;
 }
 
-int APS5_VABI sceHmd2SetIpdOffset() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeZero() {
+    return BeforeInitialize(0, __func__);
 }
+APS5_EXPORT("vDgpdS2N9Rw", Hmd2BeforeInitializeZero);
+APS5_EXPORT("Ri35gKTZpvE", Hmd2BeforeInitializeZero);
+APS5_EXPORT("9oyW8puiKeI", Hmd2BeforeInitializeZero);
+APS5_EXPORT("1HZNE6jhBnQ", Hmd2BeforeInitializeZero);
+APS5_EXPORT("cdwAKBZLXjs", Hmd2BeforeInitializeZero);
+APS5_EXPORT("Yub1MF58jfY", Hmd2BeforeInitializeZero);
+APS5_EXPORT("JYXAuQFnPyw", Hmd2BeforeInitializeZero);
+APS5_EXPORT("VuPKqCu3wzw", Hmd2BeforeInitializeZero);
+APS5_EXPORT("GSThagVyW5U", Hmd2BeforeInitializeZero);
+APS5_EXPORT("J4qE5N937MY", Hmd2BeforeInitializeZero);
+APS5_EXPORT("9KnNj-dyASg", Hmd2BeforeInitializeZero);
+APS5_EXPORT("Qta2bkstbFk", Hmd2BeforeInitializeZero);
+APS5_EXPORT("5ZcObnDRBXE", Hmd2BeforeInitializeZero);
+APS5_EXPORT("AvPNn0qx4WQ", Hmd2BeforeInitializeZero);
+APS5_EXPORT("jp0apqNGgi8", Hmd2BeforeInitializeZero);
+APS5_EXPORT("-kZT7X7OMg0", Hmd2BeforeInitializeZero);
+APS5_EXPORT("1ewLtng-SVk", Hmd2BeforeInitializeZero);
+APS5_EXPORT("B0b8DeIUGes", Hmd2BeforeInitializeZero);
+APS5_EXPORT("HclLg4Oj5yw", Hmd2BeforeInitializeZero);
+APS5_EXPORT("VbEvrQXsZyY", Hmd2BeforeInitializeZero);
+APS5_EXPORT("bB6MKZi5UCQ", Hmd2BeforeInitializeZero);
+APS5_EXPORT("OXQ1EDf02XU", Hmd2BeforeInitializeZero);
+APS5_EXPORT("IAxfMTvFm0M", Hmd2BeforeInitializeZero);
+APS5_EXPORT("qTJtAtaLeno", Hmd2BeforeInitializeZero);
+APS5_EXPORT("j7Q16UX6l34", Hmd2BeforeInitializeZero);
+APS5_EXPORT("pmmNM06rLqU", Hmd2BeforeInitializeZero);
+APS5_EXPORT("zdQfyDK9Ods", Hmd2BeforeInitializeZero);
+APS5_EXPORT("aPRwp9GnljM", Hmd2BeforeInitializeZero);
+APS5_EXPORT("MjY1gBSaed0", Hmd2BeforeInitializeZero);
+APS5_EXPORT("evAMjJYHqW4", Hmd2BeforeInitializeZero);
+APS5_EXPORT("r93FLEZ3BBk", Hmd2BeforeInitializeZero);
+APS5_EXPORT("IdYURdEdNFo", Hmd2BeforeInitializeZero);
+APS5_EXPORT("CVcL2Cu2AEI", Hmd2BeforeInitializeZero);
+APS5_EXPORT("NmKIfVxr2s0", Hmd2BeforeInitializeZero);
+APS5_EXPORT("KeDLkkp62Gg", Hmd2BeforeInitializeZero);
+APS5_EXPORT("+aadu6-ra+A", Hmd2BeforeInitializeZero);
+APS5_EXPORT("FgnTiwwGSzk", Hmd2BeforeInitializeZero);
+APS5_EXPORT("PWAUwOTHbbo", Hmd2BeforeInitializeZero);
+APS5_EXPORT("WzaEApHnsP8", Hmd2BeforeInitializeZero);
+APS5_EXPORT("dXzQI8QVY7Y", Hmd2BeforeInitializeZero);
+APS5_EXPORT("cCvFKGqRh1k", Hmd2BeforeInitializeZero);
+APS5_EXPORT("uj4-2VEAFPU", Hmd2BeforeInitializeZero);
+APS5_EXPORT("sIaGStI-iLM", Hmd2BeforeInitializeZero);
+APS5_EXPORT("JzwpZOemDO8", Hmd2BeforeInitializeZero);
+APS5_EXPORT("IsC4R4bZFVU", Hmd2BeforeInitializeZero);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeNotInitialized() {
+    return BeforeInitialize(Hmd2::NotInitialized, __func__);
+}
+APS5_EXPORT("sXaPEPY-fLA", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("3F5inHhKzXg", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("sJAiB-6p55U", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("E8hDydLjsSs", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("xEQkSb2WJ7Y", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("aaP4dnR4q-0", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("lEU0TeUoGwI", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("cFVyjHBpUUU", Hmd2BeforeInitializeNotInitialized);
+APS5_EXPORT("zROtb46jTj4", Hmd2BeforeInitializeNotInitialized);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeError0004() {
+    return BeforeInitialize(Hmd2::Error0004, __func__);
+}
+APS5_EXPORT("kAMsjYHBbNQ", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("5m73zmLpsQ0", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("EPeH4xuQ2XQ", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("TJ8lyRsjFY4", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("-XQVcLnyX68", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("giQwQoHhYYA", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("zNc9IkgawMI", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("-tnG5UJPvAc", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("FPhFmG+jXuQ", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("CKlkvNngofQ", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("yL1CZaciFWE", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("qlzgyG3s0RY", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("kTIDrDLzMv0", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("9Gee0ef8a+U", Hmd2BeforeInitializeError0004);
+APS5_EXPORT("ecZVjQdwmBI", Hmd2BeforeInitializeError0004);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeParameterNull() {
+    return BeforeInitialize(Hmd2::ParameterNull, __func__);
+}
+APS5_EXPORT("MNtiJTDOPAU", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("RRy9WmqZfgU", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("uobR4m9lgwc", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("-XPk5KWBYdo", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("J44idh9izZM", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("Ps0wAvYaa1E", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("kLnMR8oQ1MY", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("kMz4rbBxvjo", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("DIU1sFRRaiE", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("ZQvU4vDzZGQ", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("TJpyGGP9YEY", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("Dih+Odk+RC0", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("oaqdSJw+HVY", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("m35gtHuanXU", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("CTM7QPLJF9Q", Hmd2BeforeInitializeParameterNull);
+APS5_EXPORT("+rExHeC9lP0", Hmd2BeforeInitializeParameterNull);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeParameterInvalid() {
+    return BeforeInitialize(Hmd2::ParameterInvalid, __func__);
+}
+APS5_EXPORT("bBh5bCp9coo", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("G3PNDE2VjfY", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("nScCT0OPU0o", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("6Q0Ng7OTN9o", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("-fJKh4SnFR0", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("jUA2s-l0npY", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("+9XhyAIJVj4", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("eBGK-o6E4RQ", Hmd2BeforeInitializeParameterInvalid);
+APS5_EXPORT("MTuFeL9184E", Hmd2BeforeInitializeParameterInvalid);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeReprojectionNotInitialized() {
+    return BeforeInitialize(Hmd2::ReprojectionNotInitialized, __func__);
+}
+APS5_EXPORT("d3SEIYTP6wc", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("EVECbTvBezo", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("ciusPdJKjSU", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("DIwqTkcZiJo", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("64ERZWVFBTE", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("z0+0gXUJWs8", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("rjAd4nCY4DM", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("Acyg4vTdGm0", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("aGOWaEeg04I", Hmd2BeforeInitializeReprojectionNotInitialized);
+APS5_EXPORT("9up+EPhw1No", Hmd2BeforeInitializeReprojectionNotInitialized);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeError002C() {
+    return BeforeInitialize(Hmd2::Error002C, __func__);
+}
+APS5_EXPORT("V1kLQmP-17U", Hmd2BeforeInitializeError002C);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeError1002() {
+    return BeforeInitialize(Hmd2::Error1002, __func__);
+}
+APS5_EXPORT("2LVD1EC5SYE", Hmd2BeforeInitializeError1002);
+APS5_EXPORT("Bf87AL6zWxU", Hmd2BeforeInitializeError1002);
+APS5_EXPORT("XKt7w1MODFY", Hmd2BeforeInitializeError1002);
+APS5_EXPORT("Y5s22M-qUDA", Hmd2BeforeInitializeError1002);
+APS5_EXPORT("JJKY-BtQJLg", Hmd2BeforeInitializeError1002);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeError1003() {
+    return BeforeInitialize(Hmd2::Error1003, __func__);
+}
+APS5_EXPORT("9kj9vw8UShQ", Hmd2BeforeInitializeError1003);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeMinusOne() {
+    return BeforeInitialize(-1, __func__);
+}
+APS5_EXPORT("EAkv8Mqt33E", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("Rv7bkmKvmz0", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("1oPZizn0SNA", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("TwCpE-nNrlo", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("jkqAeQfdtxw", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("+l0RQph81Z8", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("qsmAtGw1Ncc", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("uKhwYoMsIsA", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("WNdaigr94dI", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("P6S5ZVWf-H0", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("sun6NWE1sdg", Hmd2BeforeInitializeMinusOne);
+APS5_EXPORT("--TFsJYXo04", Hmd2BeforeInitializeMinusOne);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeValue0400() {
+    return BeforeInitialize(0x400, __func__);
+}
+APS5_EXPORT("BWqcwjCozzI", Hmd2BeforeInitializeValue0400);
+
+std::int32_t APS5_VABI Hmd2BeforeInitializeValue20000() {
+    return BeforeInitialize(0x20000, __func__);
+}
+APS5_EXPORT("PRz7TdBGUI0", Hmd2BeforeInitializeValue20000);
 
 int APS5_VABI sceHmd2InternalSetPortStatus(void) {
     NotImplemented_nid_no_patch(__func__);

@@ -14,6 +14,11 @@ inline constexpr std::int32_t InvalidHandle = static_cast<std::int32_t>(0x8a7200
 inline constexpr std::int32_t AlreadyOpened = static_cast<std::int32_t>(0x8a720006);
 inline constexpr std::int32_t ParameterNull = static_cast<std::int32_t>(0x8a720008);
 inline constexpr std::int32_t ParameterInvalid = static_cast<std::int32_t>(0x8a720009);
+inline constexpr std::int32_t Error0004 = static_cast<std::int32_t>(0x8a720004);
+inline constexpr std::int32_t ReprojectionNotInitialized = static_cast<std::int32_t>(0x8a72000b);
+inline constexpr std::int32_t Error002C = static_cast<std::int32_t>(0x8a72002c);
+inline constexpr std::int32_t Error1002 = static_cast<std::int32_t>(0x8a721002);
+inline constexpr std::int32_t Error1003 = static_cast<std::int32_t>(0x8a721003);
 
 inline constexpr std::uint32_t UserIdSdkVersion = 0x07000000;
 

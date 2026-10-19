@@ -11,10 +11,21 @@
 #include <stdexcept>
 
 extern "C" {
-int APS5_VABI sceHmd2GazeActivateGazeTracking();
-int APS5_VABI sceHmd2ReprojectionGetCurrentOutput();
 int APS5_VABI sceHmd2SetFieldOfView();
+std::int32_t APS5_VABI Hmd2BeforeInitializeZero();
+std::int32_t APS5_VABI Hmd2BeforeInitializeNotInitialized();
+std::int32_t APS5_VABI Hmd2BeforeInitializeError0004();
+std::int32_t APS5_VABI Hmd2BeforeInitializeParameterNull();
+std::int32_t APS5_VABI Hmd2BeforeInitializeParameterInvalid();
+std::int32_t APS5_VABI Hmd2BeforeInitializeReprojectionNotInitialized();
+std::int32_t APS5_VABI Hmd2BeforeInitializeError002C();
+std::int32_t APS5_VABI Hmd2BeforeInitializeError1002();
+std::int32_t APS5_VABI Hmd2BeforeInitializeError1003();
+std::int32_t APS5_VABI Hmd2BeforeInitializeMinusOne();
+std::int32_t APS5_VABI Hmd2BeforeInitializeValue0400();
+std::int32_t APS5_VABI Hmd2BeforeInitializeValue20000();
 }
+
 namespace {
 
 alignas(16) std::array<std::byte, 0x40> process{};
@@ -48,6 +59,18 @@ void TestBeforeInitialize() {
     Require(sceHmd2Open(USER_SERVICE_INITIAL_USER_ID, 0, 0, nullptr) == Hmd2::NotInitialized, "open before initialization");
     Require(sceHmd2Close(0) == Hmd2::NotInitialized, "close before initialization");
     Require(sceHmd2Terminate() == Hmd2::NotInitialized, "terminate before initialization");
+    Require(Hmd2BeforeInitializeZero() == 0, "Hmd2BeforeInitializeZero before initialization");
+    Require(Hmd2BeforeInitializeNotInitialized() == Hmd2::NotInitialized, "Hmd2BeforeInitializeNotInitialized before initialization");
+    Require(Hmd2BeforeInitializeError0004() == Hmd2::Error0004, "Hmd2BeforeInitializeError0004 before initialization");
+    Require(Hmd2BeforeInitializeParameterNull() == Hmd2::ParameterNull, "Hmd2BeforeInitializeParameterNull before initialization");
+    Require(Hmd2BeforeInitializeParameterInvalid() == Hmd2::ParameterInvalid, "Hmd2BeforeInitializeParameterInvalid before initialization");
+    Require(Hmd2BeforeInitializeReprojectionNotInitialized() == Hmd2::ReprojectionNotInitialized, "Hmd2BeforeInitializeReprojectionNotInitialized before initialization");
+    Require(Hmd2BeforeInitializeError002C() == Hmd2::Error002C, "Hmd2BeforeInitializeError002C before initialization");
+    Require(Hmd2BeforeInitializeError1002() == Hmd2::Error1002, "Hmd2BeforeInitializeError1002 before initialization");
+    Require(Hmd2BeforeInitializeError1003() == Hmd2::Error1003, "Hmd2BeforeInitializeError1003 before initialization");
+    Require(Hmd2BeforeInitializeMinusOne() == -1, "Hmd2BeforeInitializeMinusOne before initialization");
+    Require(Hmd2BeforeInitializeValue0400() == 0x400, "Hmd2BeforeInitializeValue0400 before initialization");
+    Require(Hmd2BeforeInitializeValue20000() == 0x20000, "Hmd2BeforeInitializeValue20000 before initialization");
     Require(sceHmd2SetVibration(0, 0) == 0, "vibration of the unopened handle 0 failed");
 }
 
@@ -59,6 +82,18 @@ void TestWithoutHeadset() {
     Hmd2::DeviceInformation info;
     Require(sceHmd2GetDeviceInformation(&info) == Hmd2::NotInitialized, "device information without a headset");
     Require(sceHmd2Terminate() == Hmd2::NotInitialized, "terminate after the failed initialization");
+    Require(Hmd2BeforeInitializeZero() == 0, "Hmd2BeforeInitializeZero after the failed initialization");
+    Require(Hmd2BeforeInitializeNotInitialized() == Hmd2::NotInitialized, "Hmd2BeforeInitializeNotInitialized after the failed initialization");
+    Require(Hmd2BeforeInitializeError0004() == Hmd2::Error0004, "Hmd2BeforeInitializeError0004 after the failed initialization");
+    Require(Hmd2BeforeInitializeParameterNull() == Hmd2::ParameterNull, "Hmd2BeforeInitializeParameterNull after the failed initialization");
+    Require(Hmd2BeforeInitializeParameterInvalid() == Hmd2::ParameterInvalid, "Hmd2BeforeInitializeParameterInvalid after the failed initialization");
+    Require(Hmd2BeforeInitializeReprojectionNotInitialized() == Hmd2::ReprojectionNotInitialized, "Hmd2BeforeInitializeReprojectionNotInitialized after the failed initialization");
+    Require(Hmd2BeforeInitializeError002C() == Hmd2::Error002C, "Hmd2BeforeInitializeError002C after the failed initialization");
+    Require(Hmd2BeforeInitializeError1002() == Hmd2::Error1002, "Hmd2BeforeInitializeError1002 after the failed initialization");
+    Require(Hmd2BeforeInitializeError1003() == Hmd2::Error1003, "Hmd2BeforeInitializeError1003 after the failed initialization");
+    Require(Hmd2BeforeInitializeMinusOne() == -1, "Hmd2BeforeInitializeMinusOne after the failed initialization");
+    Require(Hmd2BeforeInitializeValue0400() == 0x400, "Hmd2BeforeInitializeValue0400 after the failed initialization");
+    Require(Hmd2BeforeInitializeValue20000() == 0x20000, "Hmd2BeforeInitializeValue20000 after the failed initialization");
 }
 
 }
@@ -80,20 +115,6 @@ int main() {
     TestBeforeInitialize();
     TestWithoutHeadset();
     bool threw = false;
-    try {
-        sceHmd2GazeActivateGazeTracking();
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw, "gaze activation did not throw");
-    threw = false;
-    try {
-        sceHmd2ReprojectionGetCurrentOutput();
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw, "reprojection get current output did not throw");
-    threw = false;
     try {
         sceHmd2SetFieldOfView();
     } catch (const std::runtime_error&) {
