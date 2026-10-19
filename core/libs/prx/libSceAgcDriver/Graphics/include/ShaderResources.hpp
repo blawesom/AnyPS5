@@ -463,6 +463,7 @@ private:
         std::array<std::uint32_t, 8> words{};
         bool depthCompare = false;
         VkImageViewType multisampleViewType = VK_IMAGE_VIEW_TYPE_2D;
+        bool firstSample = false;
         std::shared_ptr<Texture> texture;
     };
     PreviousSampled previousSampled;
