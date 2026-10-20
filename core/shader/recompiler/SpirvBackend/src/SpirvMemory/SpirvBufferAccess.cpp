@@ -99,14 +99,10 @@ void EmitPixelFunctionLdsBase(SpirvEmitterState& state) {
         state.module.AddFunction(spv::OpSelect, TypeU32(state), claimed, exhausted, ConstantU32(state, 0u), acquired);
         state.module.AddFunction(spv::OpStore, slotVar, claimed);
     });
-    const auto ballot = state.module.AllocateId();
-    state.module.AddFunction(spv::OpGroupNonUniformBallot, TypeU32Vector(state, 4u), ballot, ConstantU32(state, spv::ScopeSubgroup), elected);
-    const auto source = state.module.AllocateId();
-    state.module.AddFunction(spv::OpGroupNonUniformBallotFindLSB, TypeU32(state), source, ConstantU32(state, spv::ScopeSubgroup), ballot);
     const auto local = state.module.AllocateId();
     state.module.AddFunction(spv::OpLoad, TypeU32(state), local, slotVar);
     const auto slot = state.module.AllocateId();
-    state.module.AddFunction(spv::OpGroupNonUniformBroadcast, TypeU32(state), slot, ConstantU32(state, spv::ScopeSubgroup), local, source);
+    state.module.AddFunction(spv::OpGroupNonUniformBroadcastFirst, TypeU32(state), slot, ConstantU32(state, spv::ScopeSubgroup), local);
     std::uint32_t lane;
     if (state.splitSubgroup) {
         if (state.subgroupLocalInvocationIdVariable == 0) FailEmit("pixel function LDS lane was not declared");
