@@ -36,7 +36,8 @@ struct SpirvTargetOptions {
     std::uint32_t barycentricPositionsLocation = 0xffffffffu;
     std::vector<std::uint32_t> meshExportedLocations;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> meshPerVertexLocations;
-    bool largePixelFunctionLdsBuffer = false;};
+    bool largePixelFunctionLdsBuffer = false;
+};
 
 struct SpirvEmitInfo {
     bool fullSubgroups = false;
