@@ -420,7 +420,7 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
                 if (handle != INVALID_HANDLE_VALUE && GetFileType(handle) == FILE_TYPE_PIPE) pipes = true;
 #else
                 struct stat status{};
-                if (::fstat(interest.descriptor, &status) == 0 && S_ISFIFO(status.st_mode)) entries.push_back({interest.descriptor, interest.write ? WriteMask : ReadMask, 0});
+                if (::fstat(interest.descriptor, &status) != 0 || (!S_ISREG(status.st_mode) && !S_ISDIR(status.st_mode))) entries.push_back({interest.descriptor, interest.write ? WriteMask : ReadMask, 0});
 #endif
                 continue;
             }
