@@ -138,6 +138,29 @@ def scan(pr):
 def probe(pr):
     changes = git("diff", "--name-only", "--no-renames", "-z", f"refs/pr/base...{pr['ref']}").split("\0")
     files = {path for path in changes if path}
+    fork = git("merge-base", "refs/pr/base", pr["ref"]).strip()
+    status = git("diff", "--name-status", "--find-renames", "-z", fork, "refs/pr/base").split("\0")
+    renamed = {}
+    index = 0
+    while index < len(status):
+        entry = status[index]
+        index += 1
+        if not entry:
+            continue
+        if entry[0] in ("R", "C"):
+            old, new = status[index:index + 2]
+            index += 2
+            renamed.setdefault(old, set()).add(new)
+            renamed.setdefault(new, set()).add(old)
+        else:
+            index += 1
+    frontier = set(files)
+    while frontier:
+        path = frontier.pop()
+        for related in renamed.get(path, ()):
+            if related not in files:
+                files.add(related)
+                frontier.add(related)
     if not any(path.startswith("core/libs/prx/") and path.endswith(".cpp") for path in files):
         return files, set()
     return files, exports(git("diff", "-U0", "--no-color", f"refs/pr/base...{pr['ref']}", "--", "core/libs/prx/*.cpp"))

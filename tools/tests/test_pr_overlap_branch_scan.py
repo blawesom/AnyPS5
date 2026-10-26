@@ -104,5 +104,45 @@ class BranchScanTests(unittest.TestCase):
         self.assertCountEqual(merged, ["refs/pr/1", "refs/pr/2", "refs/pr/3", "refs/pr/4"])
 
 
+class RenamePrefilterTests(unittest.TestCase):
+    def setUp(self):
+        self.old = os.getcwd()
+        self.tmp = tempfile.TemporaryDirectory()
+        os.chdir(self.tmp.name)
+        run("init", "-q")
+        write("old.txt", "one\ntwo\nthree\n")
+        run("add", "-A")
+        run("commit", "-q", "-m", "original")
+        original = run("rev-parse", "HEAD")
+        run("checkout", "-q", "--detach", original)
+        run("mv", "old.txt", "renamed.txt")
+        run("commit", "-q", "-m", "rename old.txt to renamed.txt")
+        base = run("rev-parse", "HEAD")
+        run("update-ref", "refs/pr/base", base)
+        branch = commit_on_base(base, "branch edit", {"renamed.txt": "branch\ntwo\nthree\n"})
+        forked = commit_on_base(original, "fork edit", {"old.txt": "forked\ntwo\nthree\n"})
+        run("update-ref", "refs/pr/1", forked)
+        self.prs = {1: {"ref": "refs/pr/1", "sha": forked, "author": "author1", "depends": set()}}
+        self.prs[0] = {"ref": branch, "author": None, "depends": set()}
+
+    def test_prefilter_retains_a_pull_request_forked_before_a_base_rename(self):
+        merged = []
+
+        def record(*args):
+            merged.append(args[1])
+            return real(*args)
+
+        real = pr_overlap.merge
+        with patch.object(pr_overlap, "merge", side_effect=record):
+            pr_overlap.scan_all(self.prs, 2)
+        self.assertIn("refs/pr/1", merged)
+
+        everything = copy.deepcopy(self.prs)
+        for pr in everything.values():
+            pr_overlap.scan(pr)
+        self.assertEqual(pr_overlap.overlaps(everything, 0, 1)["conflicts"], {"renamed.txt": [(1, 1)]})
+        self.assertEqual(pr_overlap.overlaps(self.prs, 0, 1), pr_overlap.overlaps(everything, 0, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
