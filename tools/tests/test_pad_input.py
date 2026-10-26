@@ -107,6 +107,25 @@ class PadInputTests(unittest.TestCase):
         self.assertEqual(self.path.read_text(encoding="utf-8"), original)
         self.assertEqual(list(self.root.iterdir()), [self.path])
 
+    def test_unreadable_existing_command_reports_error_and_preserves_command(self):
+        original = "1000 16384 300\n"
+        self.path.write_text(original, encoding="utf-8")
+        real_open = Path.open
+
+        def open_denying_existing_command_read(path, *args, **kwargs):
+            if Path(path) == self.path and "r" in (kwargs.get("mode") or (args[0] if args else "r")):
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *args, **kwargs)
+
+        errors = io.StringIO()
+        with mock.patch.object(Path, "open", open_denying_existing_command_read), \
+                contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as error:
+            self.queue(1000, "down")
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("cannot read", errors.getvalue())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), original)
+        self.assertEqual(list(self.root.iterdir()), [self.path])
+
     def test_output_has_consistent_lf_newlines_and_utf8(self):
         self.queue(1000, "cross")
         content = self.path.read_bytes()

@@ -20,7 +20,7 @@ def previous_sequence(path):
     try:
         with path.open("rb") as command:
             line = command.readline(129)
-    except (FileNotFoundError, IsADirectoryError, PermissionError):
+    except FileNotFoundError:
         return 0
     if os.name == "nt" and line.endswith(b"\r\n"):
         line = line[:-2] + b"\n"
@@ -68,6 +68,8 @@ def main():
         sticks = "".join(f" {axis}" for axis in axes)
     try:
         sequence = next_sequence(args.path)
+    except OSError as error:
+        parser.error(f"cannot read {args.path}: {error}")
     except ValueError as error:
         parser.error(str(error))
     metadata = None
