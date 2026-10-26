@@ -102,11 +102,9 @@ int main() {
     try {
         checkNormalAllocation();
 
-
         expectBoundaryRejection(
             static_cast<std::uint32_t>(INT32_MAX) - 64u
         );
-
 
         expectBoundaryRejection(
             static_cast<std::uint32_t>(INT32_MAX) - 16u
