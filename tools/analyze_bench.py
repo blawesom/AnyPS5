@@ -5,11 +5,11 @@ import math
 
 def parse_fps(title):
     if not title:
-        return 0.0
+        return None
     match = re.search(r"FPS:\s*([\d\.]+)", title)
     if match:
         return float(match.group(1))
-    return 0.0
+    return None
 
 def percentile(data, p):
     if not data:
@@ -56,12 +56,12 @@ def main():
             sec = int(row["Second"])
             fps = parse_fps(row.get("Title", ""))
             rows.append((sec, fps, row.get("Title", "")))
-    full_fps = [r[1] for r in rows]
-    steady_fps = [r[1] for r in rows if w_start <= r[0] <= w_end]
+    full_fps = [r[1] for r in rows if r[1] is not None]
+    steady_fps = [r[1] for r in rows if r[1] is not None and w_start <= r[0] <= w_end]
     full_stats = compute_stats(full_fps)
     steady_stats = compute_stats(steady_fps)
     print(f"=== Benchmark Analysis: {csv_path} ===")
-    print(f"Total samples: {len(rows)}")
+    print(f"Samples: {len(rows)} total, {len(full_fps)} with FPS")
     print(f"Full run (all seconds):")
     print(f"  Min:    {full_stats['min']:.2f}")
     print(f"  P10:    {full_stats['p10']:.2f}")
