@@ -1515,7 +1515,7 @@ if(BUILD_TESTING)
     add_test(NAME guest_kqueue COMMAND guest_kqueue_tests)
     set_tests_properties(guest_kqueue PROPERTIES TIMEOUT 20)
     add_test(NAME guest_kqueue_cleared_race COMMAND guest_kqueue_tests cleared-race)
-    set_tests_properties(guest_kqueue_cleared_race PROPERTIES TIMEOUT 60)
+    set_tests_properties(guest_kqueue_cleared_race PROPERTIES TIMEOUT 30)
     if(WIN32)
         target_link_libraries(guest_kqueue_tests PRIVATE advapi32)
         set_tests_properties(guest_kqueue guest_kqueue_cleared_race PROPERTIES ENVIRONMENT_MODIFICATION

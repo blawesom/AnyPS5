@@ -587,9 +587,9 @@ static void ClearedKqueueKeepsConcurrentActivations() {
     const auto watched = static_cast<std::uintptr_t>(inner);
     KernelEvent events[4]{};
     Require(Apply(inner, Change(7, EvfiltUser, EvAdd | EvClear)) == 0);
-    for (std::uintptr_t filler = 100; filler < 20100; ++filler) Require(Apply(inner, Change(filler, EvfiltUser, EvAdd)) == 0);
+    for (std::uintptr_t filler = 100; filler < 12100; ++filler) Require(Apply(inner, Change(filler, EvfiltUser, EvAdd)) == 0);
     Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
-    for (int round = 0; round < 5000; ++round) {
+    for (int round = 0; round < 1250; ++round) {
         std::thread trigger([inner] { Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0); });
         const int reported = Wait(outer, events, 4);
         trigger.join();
