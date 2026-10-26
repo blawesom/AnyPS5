@@ -202,6 +202,7 @@ int APS5_VABI sceVoiceWriteToIPort(uint32_t input_port_id, const void* data, uin
     auto& voice = State();
     std::lock_guard lock(voice.mutex);
     if (!IsInput(RequirePort(voice, input_port_id, __func__).type)) Fail(__func__, "port is not an input port");
+    *size = 0;
     return 0;
 }
 

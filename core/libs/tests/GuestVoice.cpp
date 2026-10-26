@@ -71,7 +71,7 @@ int main() {
     std::uint32_t size = sizeof(data);
     Require(sceVoiceReadFromOPort(output, data, &size) == 0 && size == 0);
     size = sizeof(data);
-    Require(sceVoiceWriteToIPort(input, data, &size, 0) == 0 && size == sizeof(data));
+    Require(sceVoiceWriteToIPort(input, data, &size, 0) == 0 && size == 0);
     RequireThrows([&] {
         std::uint32_t writeSize = sizeof(data);
         sceVoiceWriteToIPort(output, data, &writeSize, 0);
