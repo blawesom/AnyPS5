@@ -621,8 +621,14 @@ static void ClearedKqueueRechecksTheWatchedCount() {
     Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0);
     Require(Apply(inner, Change(8, EvfiltUser, 0, NoteTrigger)) == 0);
     Require(Apply(outer, Change(1, EvfiltUser, 0, NoteTrigger)) == 0);
-    Require(Poll(outer, events, 1) == 1 && events[0].ident == 1);
+    Require(Poll(outer, events, 2) == 2);
+    const int userIndex = events[0].ident == 1 ? 0 : 1;
+    const int watchIndex = events[0].ident == watched ? 0 : 1;
+    Require(userIndex != watchIndex);
+    Require(events[userIndex].ident == 1 && events[userIndex].filter == EvfiltUser);
+    Require(events[watchIndex].ident == watched && events[watchIndex].filter == EvfiltRead && events[watchIndex].data == 2);
     Require(Poll(inner, events, 1) == 1);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
     Require(Poll(outer, events, 4) == 1 && events[0].ident == watched && events[0].data == 1);
     Require(Poll(outer, events, 4) == 0);
 
