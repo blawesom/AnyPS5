@@ -632,6 +632,7 @@ struct VulkanDevice::State {
     bool maintenance5 = false;
     bool pipelineBinaries = false;
     bool pipelineBinaryExtension = false;
+    VkDriverId pipelineBinaryDriverId = VK_DRIVER_ID_MAX_ENUM;
     Graphics::PipelineBinaryPolicy pipelineBinaryPolicy = Graphics::PipelineBinaryPolicy::Disabled;
     bool fillModeNonSolid = false;
     bool wideLines = false;
@@ -1626,7 +1627,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     check(enumerateDeviceExtensions(selected, nullptr, &extensionCount, availableExtensions.data()), "vkEnumerateDeviceExtensionProperties");
     const auto hasExtension = [&](const char* name) { return std::any_of(availableExtensions.begin(), availableExtensions.end(), [&](const auto& item) { return std::strcmp(item.extensionName, name) == 0; }); };
     VkDriverId driverId{};
-    if (state->properties.apiVersion >= VK_API_VERSION_1_2 || hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+    if (hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
         VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
         VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
@@ -2061,7 +2062,8 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     }
     VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR};
     state->pipelineBinaryExtension = hasExtension(VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
-    state->pipelineBinaryPolicy = Graphics::PipelineBinaryStore::PolicyForDriver(state->driverId);
+    state->pipelineBinaryDriverId = Graphics::PipelineBinaryStore::DriverIdentity(selected, state->properties.apiVersion, hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME), state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2"));
+    state->pipelineBinaryPolicy = Graphics::PipelineBinaryStore::PolicyForDriver(state->pipelineBinaryDriverId);
     Graphics::PipelineBinaryStore::ReportPolicy(state->pipelineBinaryPolicy);
     const bool wantPipelineBinaries = state->pipelineBinaryExtension && state->pipelineBinaryPolicy == Graphics::PipelineBinaryPolicy::Enabled && !ShaderRecompiler::ShaderCacheDirectory().empty() &&
         Graphics::PipelineBinaryStore::LayersCompatible(selected, state->InstanceFunction<PFN_vkEnumerateDeviceLayerProperties>("vkEnumerateDeviceLayerProperties"));
@@ -2708,7 +2710,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     if (!compileOnly && Pm4::GdsImportable() && Graphics::HostImportFor(graphicsContext(), Pm4::GdsAddress(), Pm4::GdsBytes, Graphics::ImportRequester::Map) == nullptr) Pm4::RejectGdsImport();
     static const bool headlessPipelineCache = std::getenv("APS5_HEADLESS_PIPELINE_CACHE") != nullptr;
     state->pipelineCache = std::make_unique<Graphics::PipelineCache>(graphicsContext(), state->properties, window != nullptr || compileOnly || headlessPipelineCache);
-    if (state->pipelineBinaries) state->pipelineBinaryStore = std::make_unique<Graphics::PipelineBinaryStore>(graphicsContext(), state->properties, state->driverId);
+    if (state->pipelineBinaries) state->pipelineBinaryStore = std::make_unique<Graphics::PipelineBinaryStore>(graphicsContext(), state->properties, state->pipelineBinaryDriverId);
     state->detiler = std::make_unique<Graphics::TextureDetiler>(graphicsContext());
     state->textureCache = std::make_unique<Graphics::TextureCache>(graphicsContext());
     state->colorTransfer = std::make_unique<Graphics::GpuColorTransfer>(graphicsContext());
@@ -4640,7 +4642,7 @@ std::string VulkanDevice::DriverInfo() const {
 }
 
 VkDriverId VulkanDevice::DriverId() const {
-    return state->driverId;
+    return state->pipelineBinaryDriverId;
 }
 
 VulkanDevice::PipelineBinaryStatus VulkanDevice::PipelineBinariesStatus() const {
