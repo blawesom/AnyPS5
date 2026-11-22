@@ -161,18 +161,38 @@ void DecodeChargedAndReleased() {
     Require(footprint.variantBytes <= AgcDriver::DriverDetail::Driver::DrawCacheBytes(), "the draw cache exceeds its byte budget after evicting for the decode charge");
 }
 
+void DecodeChargesRefundOnEviction() {
+    RegisterShaders();
+    constexpr std::size_t Rounds = 4;
+    for (std::size_t i = 0; i < Rounds * 2; ++i) Sources[i] = {static_cast<float>(i + 1) / static_cast<float>(Rounds * 2 + 1), 0.0f, 0.0f, 1.0f};
+    auto& driver = AgcDriver::DriverDetail::Driver::Get();
+    const auto footprint = [&](std::size_t offset) {
+        auto commands = EveryDraw(std::span{Sources}.subspan(offset, 2));
+        Pass(commands);
+        Pass(commands);
+        return driver.DrawCacheSize();
+    };
+    const auto first = footprint(0);
+    auto last = first;
+    for (std::size_t round = 1; round < Rounds; ++round) last = footprint(round * 2);
+    std::cout << "decode refund: " << first.entries << " entries " << first.variantBytes << " bytes, then " << last.entries << " entries " << last.variantBytes << " bytes after " << (Rounds - 1) * 2 << " distinct draws evicted their predecessors\n";
+    Require(first.entries == 2 && last.entries == 2, "the two-entry cap should hold two entries while distinct draws churn");
+    Require(last.variantBytes <= first.variantBytes + 2048, "evicting a draw did not refund its DrawDecode charge; the accounted bytes grow across evictions");
+}
+
 }
 
 int main(int argc, char** argv) {
     try {
         const auto test = argc == 2 ? std::string_view(argv[1]) : std::string_view{};
-        Require(argc == 1 || test == "--metadata-budget" || test == "--shared-result" || test == "--decode-budget", "unknown draw cache capacity test argument");
+        Require(argc == 1 || test == "--metadata-budget" || test == "--shared-result" || test == "--decode-budget" || test == "--decode-refund", "unknown draw cache capacity test argument");
         {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
         if (test == "--shared-result") SharedResultsAreChargedOnce();
         else if (test == "--decode-budget") DecodeChargedAndReleased();
+        else if (test == "--decode-refund") DecodeChargesRefundOnEviction();
         else CacheDistinctDraws(test == "--metadata-budget");
         AgcDriverShutdown_nid_postfix();
         if (test.empty()) std::cout << Draws << " distinct draws stayed in the draw cache under the default entry cap\n";
