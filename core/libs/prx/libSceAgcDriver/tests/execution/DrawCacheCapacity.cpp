@@ -161,17 +161,31 @@ void DefaultEntryCapExceedsThePreviousOne() {
     Require(sightings == previousSightings, "the draw key sightings hold " + std::to_string(sightings) + " keys, not the " + std::to_string(previousSightings) + " of the previous entry cap");
 }
 
+void DecodeChargedAndReleased() {
+    RegisterShaders();
+    for (std::size_t i = 0; i < Sources.size(); ++i) Sources[i] = {static_cast<float>(i + 1) / static_cast<float>(Draws + 1), 0.0f, 0.0f, 1.0f};
+    auto commands = EveryDraw();
+    auto& driver = AgcDriver::DriverDetail::Driver::Get();
+    const auto seen = Pass(commands);
+    const auto inserted = Pass(commands);
+    const auto footprint = driver.DrawCacheSize();
+    std::cout << footprint.entries << " distinct draws held " << footprint.variantBytes << " accounted bytes, byte evictions " << (inserted.byteEvictions - seen.byteEvictions) << '\n';
+    Require(inserted.byteEvictions > seen.byteEvictions, "the retained DrawDecode storage did not trigger a draw-cache byte eviction; the decode is not charged against the byte budget");
+    Require(footprint.variantBytes <= AgcDriver::DriverDetail::Driver::DrawCacheBytes(), "the draw cache exceeds its byte budget after evicting for the decode charge");
+}
+
 }
 
 int main(int argc, char** argv) {
     try {
         const auto test = argc == 2 ? std::string_view(argv[1]) : std::string_view{};
-        Require(argc == 1 || test == "--metadata-budget" || test == "--shared-result", "unknown draw cache capacity test argument");
+        Require(argc == 1 || test == "--metadata-budget" || test == "--shared-result" || test == "--decode-budget", "unknown draw cache capacity test argument");
         {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
         if (test == "--shared-result") SharedResultsAreChargedOnce();
+        else if (test == "--decode-budget") DecodeChargedAndReleased();
         else CacheDistinctDraws(test == "--metadata-budget");
         if (test.empty()) DefaultEntryCapExceedsThePreviousOne();
         AgcDriverShutdown_nid_postfix();
